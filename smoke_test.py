@@ -244,6 +244,30 @@ def main() -> int:
     if "INSS (estimado)" in hol and "não configurado" in hol:
         raise RuntimeError("Holerite still shows taxes as not configured")
 
+    print("[7.2] Register one revenue note")
+    _request(
+        opener,
+        "POST",
+        "/payroll/revenue",
+        {
+            "year": str(test_year),
+            "month": str(test_month),
+            "issued_at": "",
+            "customer_name": "Cliente teste",
+            "description": "Nota teste",
+            "amount": "150,00",
+        },
+    )
+    rev_page = _request(
+        opener,
+        "GET",
+        f"/payroll/revenue?year={test_year}&month={test_month}",
+    ).read().decode("utf-8", errors="replace")
+    if "Receitas / Notas" not in rev_page:
+        raise RuntimeError("Revenue page title not found")
+    if "R$ 150.00" not in rev_page:
+        raise RuntimeError("Expected revenue amount not found in revenue page")
+
     print("[8] Upload sample DAS guide PDF")
     sample_pdf = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
     mp_body, boundary = _multipart(
@@ -275,6 +299,9 @@ def main() -> int:
     expected_guide = f"/media/guides/{test_year}-{test_month:02d}_das.pdf"
     if expected_guide not in close_page:
         raise RuntimeError("Expected DAS guide link not found in close page")
+
+    if "Receitas / notas do mês" not in close_page:
+        raise RuntimeError("Close page did not show revenue checklist item")
 
     if "Resumo do mês" not in close_page or "Total bruto" not in close_page:
         raise RuntimeError("Close page did not show the monthly summary block")

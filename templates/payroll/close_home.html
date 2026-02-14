@@ -156,7 +156,11 @@
 
         {% if doc %}
           <div class="mb-2">
-            <a class="btn btn-sm btn-outline-primary" target="_blank" href="/media/guides/{{ doc.filename }}">Abrir PDF</a>
+            {% if doc.filename %}
+              <a class="btn btn-sm btn-outline-primary" target="_blank" href="/media/guides/{{ doc.filename }}">Abrir PDF</a>
+            {% else %}
+              <span class="text-muted small">PDF ainda não anexado.</span>
+            {% endif %}
           </div>
           <div class="small text-muted">Valor: {{ ('R$ %.2f'|format(doc.amount)) if doc.amount else '-' }}</div>
           <div class="small text-muted">Vencimento: {{ doc.due_date.strftime('%d/%m/%Y') if doc.due_date else '-' }}</div>
@@ -172,7 +176,7 @@
 
           <div class="mb-2">
             <label class="form-label" for="file_{{ dtype }}">PDF</label>
-            <input class="form-control" type="file" id="file_{{ dtype }}" name="file" accept="application/pdf" required>
+            <input class="form-control" type="file" id="file_{{ dtype }}" name="file" accept="application/pdf">
           </div>
           <div class="mb-2">
             <label class="form-label" for="amount_{{ dtype }}">Valor (opcional)</label>
@@ -186,7 +190,7 @@
             <label class="form-label" for="paid_{{ dtype }}">Pago em (opcional)</label>
             <input class="form-control" type="date" id="paid_{{ dtype }}" name="paid_at">
           </div>
-          <button class="btn btn-primary" type="submit">Anexar / substituir</button>
+          <button class="btn btn-primary" type="submit">Salvar</button>
         </form>
       </div>
     </div>

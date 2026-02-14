@@ -1,0 +1,103 @@
+{% extends 'base.html' %}
+{% block title %}Receitas - Sistema Contabilidade{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h4 mb-0">Receitas / Notas</h1>
+    <div class="text-muted small">Registre suas notas do mês aqui. Isso serve de base para conferência, relatórios e cálculo de Fator R (Simples Nacional).</div>
+  </div>
+  <a class="btn btn-outline-secondary" href="{{ url_for('payroll.close_home', year=year, month=month) }}">Voltar ao Fechamento</a>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" action="{{ url_for('payroll.revenue_home') }}" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label" for="year">Ano</label>
+        <input class="form-control" id="year" name="year" value="{{ year }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="month">Mês</label>
+        <input class="form-control" id="month" name="month" value="{{ month }}" required>
+      </div>
+      <div class="col-12">
+        <button class="btn btn-outline-secondary" type="submit">Abrir competência</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h2 class="h6 mb-2">Resumo</h2>
+    <div class="small text-muted">Total registrado: <strong>R$ {{ '%.2f'|format(total or 0) }}</strong> ({{ notes|length }} lançamento(s))</div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h2 class="h6 mb-3">Adicionar receita</h2>
+    <form method="post" action="{{ url_for('payroll.revenue_add') }}" class="row g-2">
+      <input type="hidden" name="year" value="{{ year }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      <div class="col-md-3">
+        <label class="form-label" for="issued_at">Data (opcional)</label>
+        <input class="form-control" type="date" id="issued_at" name="issued_at">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="customer_name">Cliente (opcional)</label>
+        <input class="form-control" id="customer_name" name="customer_name" placeholder="Ex.: Cliente X">
+      </div>
+      <div class="col-md-5">
+        <label class="form-label" for="description">Descrição (opcional)</label>
+        <input class="form-control" id="description" name="description" placeholder="Ex.: Lavagem de roupas">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="amount">Valor</label>
+        <input class="form-control" id="amount" name="amount" placeholder="Ex.: 150,00" required>
+      </div>
+      <div class="col-12">
+        <button class="btn btn-primary" type="submit">Registrar</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <h2 class="h6 mb-3">Lançamentos</h2>
+    {% if not notes %}
+      <div class="text-muted small">Nenhuma receita registrada nesta competência.</div>
+    {% else %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Cliente</th>
+              <th>Descrição</th>
+              <th class="text-end">Valor</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for n in notes %}
+            <tr>
+              <td class="text-muted">{{ n.issued_at.strftime('%d/%m/%Y') if n.issued_at else '-' }}</td>
+              <td>{{ n.customer_name or '-' }}</td>
+              <td>{{ n.description or '-' }}</td>
+              <td class="text-end"><strong>R$ {{ '%.2f'|format(n.amount or 0) }}</strong></td>
+              <td class="text-end">
+                <form method="post" action="{{ url_for('payroll.revenue_delete', note_id=n.id) }}" onsubmit="return confirm('Remover esta receita?');">
+                  <button class="btn btn-sm btn-outline-danger" type="submit">Remover</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

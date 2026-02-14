@@ -115,13 +115,26 @@ class GuideDocument(db.Model):
     year = db.Column(db.Integer, nullable=False, index=True)
     month = db.Column(db.Integer, nullable=False, index=True)
     doc_type = db.Column(db.String(20), nullable=False, index=True)  # darf | das | fgts
-    filename = db.Column(db.String(255), nullable=False)
+    filename = db.Column(db.String(255), nullable=True)
     amount = db.Column(db.Numeric(12, 2), nullable=True)
     due_date = db.Column(db.Date, nullable=True)
     paid_at = db.Column(db.Date, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     __table_args__ = (db.UniqueConstraint("year", "month", "doc_type", name="uq_guide_doc_year_month_type"),)
+
+
+class RevenueNote(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    year = db.Column(db.Integer, nullable=False, index=True)
+    month = db.Column(db.Integer, nullable=False, index=True)
+    issued_at = db.Column(db.Date, nullable=True)
+    customer_name = db.Column(db.String(255), nullable=False, default="")
+    description = db.Column(db.String(255), nullable=False, default="")
+    amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (db.Index("ix_revenue_note_year_month", "year", "month"),)
 
 
 class TaxInssBracket(db.Model):

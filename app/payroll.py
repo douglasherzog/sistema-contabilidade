@@ -15,6 +15,7 @@ from .models import (
     EmployeeDependent,
     EmployeeSalary,
     GuideDocument,
+    RevenueNote,
     PayrollLine,
     PayrollRun,
     TaxInssBracket,
@@ -51,6 +52,21 @@ def _competence_start(year: int, month: int) -> date:
 
 def _competence_is_closed(year: int, month: int) -> bool:
     return CompetenceClose.query.filter_by(year=int(year), month=int(month)).first() is not None
+
+
+def _calc_revenue_month_summary(year: int, month: int) -> dict:
+    notes = RevenueNote.query.filter_by(year=int(year), month=int(month)).all()
+    total = Decimal("0")
+    for n in notes:
+        try:
+            total += Decimal(str(n.amount or 0))
+        except Exception:
+            total += Decimal("0")
+    total = total.quantize(Decimal("0.01"))
+    return {
+        "count": len(notes),
+        "total": total,
+    }
 
 
 def _salary_for_employee(employee: Employee, year: int, month: int) -> Decimal:
@@ -516,8 +532,16 @@ def close_home():
     }
 
     summary = _calc_month_summary(run)
+    revenue_summary = _calc_revenue_month_summary(year, month)
 
     checklist = {
+        "revenue": {
+            "ok": bool(revenue_summary.get("count")),
+            "title": "Receitas / notas do mês",
+            "help": "Registre as notas (receitas) da competência. Isso serve para conferência, relatórios e cálculo do Fator R.",
+            "action_url": url_for("payroll.revenue_home", year=year, month=month),
+            "action_label": "Registrar receitas",
+        },
         "payroll": {
             "ok": bool(run),
             "title": "Folha do mês",
@@ -554,7 +578,84 @@ def close_home():
         closed=closed,
         checklist=checklist,
         summary=summary,
+        revenue_summary=revenue_summary,
     )
+
+
+@payroll_bp.get("/revenue")
+@login_required
+def revenue_home():
+    now = datetime.now()
+    year = int(request.args.get("year") or now.year)
+    month = int(request.args.get("month") or now.month)
+
+    notes = RevenueNote.query.filter_by(year=year, month=month).order_by(RevenueNote.issued_at.asc().nullslast()).all()
+    total = Decimal("0")
+    for n in notes:
+        try:
+            total += Decimal(str(n.amount or 0))
+        except Exception:
+            total += Decimal("0")
+    total = total.quantize(Decimal("0.01"))
+
+    return render_template(
+        "payroll/revenue_home.html",
+        year=year,
+        month=month,
+        notes=notes,
+        total=total,
+    )
+
+
+@payroll_bp.post("/revenue")
+@login_required
+def revenue_add():
+    year = int(request.form.get("year") or 0)
+    month = int(request.form.get("month") or 0)
+    if year < 2000 or month < 1 or month > 12:
+        flash("Competência inválida.", "warning")
+        return redirect(url_for("payroll.revenue_home"))
+
+    issued_at_raw = (request.form.get("issued_at") or "").strip()
+    issued_at = None
+    if issued_at_raw:
+        try:
+            issued_at = date.fromisoformat(issued_at_raw)
+        except Exception:
+            issued_at = None
+
+    customer_name = (request.form.get("customer_name") or "").strip()
+    description = (request.form.get("description") or "").strip()
+    amount = _to_decimal(request.form.get("amount"))
+    if amount <= 0:
+        flash("Informe um valor maior que zero.", "warning")
+        return redirect(url_for("payroll.revenue_home", year=year, month=month))
+
+    row = RevenueNote(
+        year=year,
+        month=month,
+        issued_at=issued_at,
+        customer_name=customer_name,
+        description=description,
+        amount=amount,
+    )
+    db.session.add(row)
+    db.session.commit()
+
+    flash("Receita registrada.", "success")
+    return redirect(url_for("payroll.revenue_home", year=year, month=month))
+
+
+@payroll_bp.post("/revenue/<int:note_id>/delete")
+@login_required
+def revenue_delete(note_id: int):
+    row = RevenueNote.query.get_or_404(note_id)
+    year = int(row.year)
+    month = int(row.month)
+    db.session.delete(row)
+    db.session.commit()
+    flash("Receita removida.", "success")
+    return redirect(url_for("payroll.revenue_home", year=year, month=month))
 
 
 @payroll_bp.post("/close/mark")
@@ -613,17 +714,6 @@ def close_upload():
         flash("Tipo de guia inválido.", "warning")
         return redirect(url_for("payroll.close_home", year=year, month=month))
 
-    f = request.files.get("file")
-    if not f or not f.filename:
-        flash("Selecione um PDF.", "warning")
-        return redirect(url_for("payroll.close_home", year=year, month=month))
-
-    fname = secure_filename(f.filename)
-    ext = os.path.splitext(fname)[1].lower()
-    if ext != ".pdf":
-        flash("Apenas PDF.", "warning")
-        return redirect(url_for("payroll.close_home", year=year, month=month))
-
     amount = _to_decimal(request.form.get("amount"))
     due_date_raw = (request.form.get("due_date") or "").strip()
     paid_at_raw = (request.form.get("paid_at") or "").strip()
@@ -641,20 +731,27 @@ def close_upload():
         except Exception:
             paid_at = None
 
-    target_name = f"{year}-{month:02d}_{doc_type}.pdf"
-    target_path = os.path.join(_media_guides_dir(), target_name)
-    f.save(target_path)
-
     doc = GuideDocument.query.filter_by(year=year, month=month, doc_type=doc_type).first()
     if not doc:
-        doc = GuideDocument(year=year, month=month, doc_type=doc_type, filename=target_name)
+        doc = GuideDocument(year=year, month=month, doc_type=doc_type, filename=None)
         db.session.add(doc)
 
-    doc.filename = target_name
+    f = request.files.get("file")
+    if f and f.filename:
+        fname = secure_filename(f.filename)
+        ext = os.path.splitext(fname)[1].lower()
+        if ext != ".pdf":
+            flash("Apenas PDF.", "warning")
+            return redirect(url_for("payroll.close_home", year=year, month=month))
+
+        target_name = f"{year}-{month:02d}_{doc_type}.pdf"
+        target_path = os.path.join(_media_guides_dir(), target_name)
+        f.save(target_path)
+        doc.filename = target_name
     doc.amount = amount if amount > 0 else None
     doc.due_date = due_date
     doc.paid_at = paid_at
 
     db.session.commit()
-    flash("Guia anexada.", "success")
+    flash("Guia atualizada.", "success")
     return redirect(url_for("payroll.close_home", year=year, month=month))
