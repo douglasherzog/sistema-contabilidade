@@ -38,6 +38,69 @@ payroll_bp = Blueprint("payroll", __name__, url_prefix="/payroll")
 
 
 TUTORIALS: dict[str, dict] = {
+    "operacao_mensal_lavanderia": {
+        "title": "Operação mensal da lavanderia (passo a passo)",
+        "goal": "Executar todo mês sem esquecer etapas críticas: folha, guias, pagamento e fechamento.",
+        "first_step": "Abra o Modo Guiado do mês e comece pela etapa 0 (cadastro oficial da empresa).",
+        "version": "v1.2",
+        "last_review": "2026-02-14",
+        "today_actions": [
+            "Abra o Modo Guiado na competência correta (ano/mês) e siga o 'Próximo passo recomendado'.",
+            "Confirme pendências críticas do dia: folha para salvar, guia para pagar, comprovante para anexar.",
+            "Antes de encerrar o dia, confira o Fechamento e deixe só itens realmente pendentes para amanhã.",
+        ],
+        "priority_actions": [
+            {
+                "label": "Hoje",
+                "level": "danger",
+                "items": [
+                    "Siga o 'Próximo passo recomendado' do Modo Guiado.",
+                    "Resolva itens críticos: folha pendente, guia vencendo e comprovante faltando.",
+                ],
+            },
+            {
+                "label": "Esta semana",
+                "level": "warning",
+                "items": [
+                    "Conferir e salvar folha após atualizar salários e eventos trabalhistas.",
+                    "Gerar guias oficiais nos portais e pagar dentro do prazo.",
+                ],
+            },
+            {
+                "label": "Até fechar o mês",
+                "level": "success",
+                "items": [
+                    "Anexar PDF/recibo das guias pagas no sistema.",
+                    "Revisar checklist do fechamento e marcar competência como fechada.",
+                ],
+            },
+        ],
+        "fields": [
+            {"name": "Competência (ano/mês)", "explain": "Sempre confirme se está no mês correto antes de lançar dados."},
+            {"name": "Checklist principal", "explain": "Use o Modo Guiado como roteiro fixo, na ordem apresentada."},
+            {"name": "Guias e comprovantes", "explain": "Depois de pagar no portal oficial, anexe PDF/recibo no sistema."},
+            {"name": "Fechamento", "explain": "Feche apenas quando tudo estiver conferido e anexado."},
+        ],
+        "steps": [
+            "Abra o Modo Guiado e selecione ano/mês da competência.",
+            "Etapa 0: confira o cadastro oficial da empresa (CNPJ, regime, classTrib e responsável).",
+            "Etapa 1: atualize funcionários, salários e eventos (férias, 13º, rescisão, afastamento).",
+            "Etapa 2: lance as receitas/notas da competência.",
+            "Etapa 3: abra/salve a folha mensal e confira holerites.",
+            "Etapa 4: confira/sincronize tabelas INSS e IRRF para o mês.",
+            "Etapa 5: gere as guias nos portais oficiais, pague e anexe os PDFs/comprovantes no sistema.",
+            "Etapa 6: revise o Fechamento e marque competência como fechada.",
+            "Se algo estiver inconsistente, reabra a competência, ajuste e feche novamente.",
+        ],
+        "emergency_checks": [
+            "Esqueci de pagar uma guia: gere/pague imediatamente no portal oficial, anexe o comprovante no sistema e registre observação no fechamento.",
+            "Lancei receita no mês errado: corrija a receita na competência correta e revise o fechamento dos dois meses antes de fechar.",
+            "Folha ficou com valor estranho: confira salário vigente, horas extras e tabelas INSS/IRRF; salve novamente e revise holerite.",
+            "Fechei a competência com pendência: clique em 'Reabrir competência', ajuste os itens faltantes e feche novamente.",
+            "Enviei eSocial com erro: gere novo XML corrigido, valide no XSD e registre protocolo correto da nova tentativa.",
+            "Não sei qual é o próximo passo: volte para o Modo Guiado e siga o card 'Próximo passo recomendado'.",
+        ],
+    },
     "painel": {
         "title": "Painel do mês (Início)",
         "goal": "Entender o que fazer primeiro na competência e quais pendências existem.",
@@ -77,11 +140,12 @@ TUTORIALS: dict[str, dict] = {
             {"name": "Próximo passo", "explain": "Botão direto para a próxima tela recomendada."},
         ],
         "steps": [
+            "Etapa 0: valide cadastro oficial da empresa.",
             "Cadastre/atualize funcionários e dados base.",
             "Registre receitas do mês.",
             "Abra e salve a folha mensal.",
             "Confira tabelas INSS/IRRF.",
-            "Anexe guias (DARF/DAS/FGTS).",
+            "Gere/pague guias oficiais e anexe comprovantes (DARF/DAS/FGTS).",
             "Só então marque competência como fechada.",
         ],
     },

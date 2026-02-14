@@ -8,6 +8,7 @@
       <div class="small lav-subtitle">Siga esta ordem para fechar a competência com segurança, mesmo sem conhecimento técnico.</div>
     </div>
     <div class="d-flex gap-2">
+      <a class="btn btn-primary btn-sm" href="{{ url_for('payroll.help_page', slug='operacao_mensal_lavanderia') }}">Tutorial mensal completo</a>
       <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('payroll.help_page', slug='modo_guiado') }}">Como usar</a>
       <form method="post" action="{{ url_for('payroll.monthly_guide_reset') }}">
         <input type="hidden" name="year" value="{{ year }}">

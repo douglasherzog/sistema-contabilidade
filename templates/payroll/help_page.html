@@ -13,10 +13,48 @@
 
 <div class="card mb-3">
   <div class="card-body">
+    {% if item.version or item.last_review %}
+      <div class="small text-muted mb-2">
+        {% if item.version %}<span>Versão: {{ item.version }}</span>{% endif %}
+        {% if item.version and item.last_review %}<span> · </span>{% endif %}
+        {% if item.last_review %}<span>Última revisão: {{ item.last_review }}</span>{% endif %}
+      </div>
+    {% endif %}
     <div class="fw-bold mb-1">O que fazer primeiro</div>
     <div class="small">{{ item.first_step }}</div>
   </div>
 </div>
+
+{% if item.priority_actions %}
+<div class="card mb-3 border-primary">
+  <div class="card-body">
+    <div class="fw-bold mb-2">Ações por prioridade</div>
+    <div class="row g-2">
+      {% for block in item.priority_actions %}
+      <div class="col-md-4">
+        <div class="card h-100 border-{{ block.level }}">
+          <div class="card-body p-2">
+            <div class="small fw-bold text-{{ block.level }} mb-1">{{ block.label }}</div>
+            {% for action in block.items %}
+              <div class="small mb-1">• {{ action }}</div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% elif item.today_actions %}
+<div class="card mb-3 border-primary">
+  <div class="card-body">
+    <div class="fw-bold mb-2">O que fazer hoje (resumo rápido)</div>
+    {% for action in item.today_actions %}
+      <div class="small mb-1">{{ loop.index }}. {{ action }}</div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 
 <div class="card mb-3">
   <div class="card-body">
@@ -36,6 +74,20 @@
     {% for s in item.steps %}
       <div class="small mb-1">{{ loop.index }}. {{ s }}</div>
     {% endfor %}
+
+    {% if item.emergency_checks %}
+      <hr>
+      <div class="fw-bold mb-2">Checklist de emergência (se algo der errado)</div>
+      {% for c in item.emergency_checks %}
+        <div class="small mb-1">• {{ c }}</div>
+      {% endfor %}
+    {% endif %}
+
+    <hr>
+    <div class="small text-muted">
+      Este tutorial será atualizado quando novas funcionalidades forem liberadas no sistema.
+      A linguagem deve continuar simples e prática, para uso por quem não é contador.
+    </div>
   </div>
 </div>
 {% endblock %}
