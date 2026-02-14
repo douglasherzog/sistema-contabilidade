@@ -2,6 +2,11 @@
 
 Sistema de contabilidade para a lavanderia.
 
+## Padrão do projeto (documentação + testes)
+
+- Consulte `CONTRIBUTING.md` (regras de contribuição/Definition of Done).
+- Consulte `docs/` (workflow, testes e registro de mudanças).
+
 ## Subir com Docker (recomendado)
 
 1. Subir:
