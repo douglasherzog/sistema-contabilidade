@@ -229,10 +229,15 @@ class EmployeeTermination(db.Model):
 
     termination_date = db.Column(db.Date, nullable=False)
     termination_type = db.Column(db.String(40), nullable=False, default="without_cause")
+    notice_type = db.Column(db.String(20), nullable=False, default="none")  # worked | indemnified | none
+    notice_days = db.Column(db.Integer, nullable=False, default=0)
     reason = db.Column(db.String(255), nullable=True)
 
     # Valores resumidos (MVP didático)
     gross_total = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    fgts_balance_est = db.Column(db.Numeric(12, 2), nullable=True)
+    fgts_fine_rate = db.Column(db.Numeric(8, 4), nullable=True)  # ex.: 0.40 | 0.20
+    fgts_fine_est = db.Column(db.Numeric(12, 2), nullable=True)
     inss_est = db.Column(db.Numeric(12, 2), nullable=True)
     irrf_est = db.Column(db.Numeric(12, 2), nullable=True)
     net_est = db.Column(db.Numeric(12, 2), nullable=True)

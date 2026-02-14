@@ -52,6 +52,26 @@
         <label class="form-label" for="gross_total">Total bruto (R$)</label>
         <input class="form-control js-money" id="gross_total" name="gross_total" placeholder="Ex.: 3.250,00">
       </div>
+      <div class="col-md-4">
+        <label class="form-label" for="notice_type">Aviso prévio</label>
+        <select class="form-select" id="notice_type" name="notice_type" required>
+          <option value="none">Não se aplica / não informado</option>
+          <option value="worked">Trabalhado</option>
+          <option value="indemnified">Indenizado</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="notice_days">Dias aviso</label>
+        <input class="form-control" id="notice_days" name="notice_days" type="number" min="0" max="120" value="30">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="fgts_balance_est">Saldo FGTS estimado (R$)</label>
+        <input class="form-control js-money" id="fgts_balance_est" name="fgts_balance_est" placeholder="Ex.: 8.500,00">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="fgts_fine_rate">Alíquota multa FGTS</label>
+        <input class="form-control" id="fgts_fine_rate" name="fgts_fine_rate" placeholder="Ex.: 0,40 (40%)">
+      </div>
       <div class="col-12">
         <label class="form-label" for="reason">Observação (opcional)</label>
         <input class="form-control" id="reason" name="reason" placeholder="Motivo / observação">
@@ -75,6 +95,8 @@
           <tr>
             <th>Data</th>
             <th>Tipo</th>
+            <th>Aviso</th>
+            <th class="text-end">Multa FGTS</th>
             <th class="text-end">Bruto</th>
             <th class="lav-th-fit"></th>
           </tr>
@@ -84,6 +106,8 @@
           <tr>
             <td>{{ r.termination_date|fmt_date }}</td>
             <td>{{ r.termination_type }}</td>
+            <td>{{ r.notice_type }}{% if r.notice_days %} ({{ r.notice_days }}d){% endif %}</td>
+            <td class="text-end">R$ {{ '%.2f'|format(r.fgts_fine_est or 0) }}</td>
             <td class="text-end">R$ {{ '%.2f'|format(r.gross_total or 0) }}</td>
             <td class="text-end">
               <a class="btn btn-sm btn-outline-secondary" target="_blank" href="{{ url_for('payroll.termination_receipt', termination_id=r.id) }}">Recibo</a>

@@ -18,10 +18,21 @@
   <div class="card-body">
     <div class="lav-kv"><span>Data da rescisão</span><strong>{{ t.termination_date|fmt_date }}</strong></div>
     <div class="lav-kv"><span>Tipo</span><strong>{{ t.termination_type }}</strong></div>
+    <div class="lav-kv"><span>Aviso prévio</span><strong>{{ t.notice_type }}{% if t.notice_days %} ({{ t.notice_days }} dias){% endif %}</strong></div>
     <div class="lav-kv"><span>Valor bruto</span><strong>R$ {{ '%.2f'|format(t.gross_total or 0) }}</strong></div>
+    <div class="lav-kv"><span>Saldo FGTS estimado</span><strong>R$ {{ '%.2f'|format(t.fgts_balance_est or 0) }}</strong></div>
+    <div class="lav-kv"><span>Alíquota multa FGTS</span><strong>{{ '%.2f'|format((t.fgts_fine_rate or 0) * 100) }}%</strong></div>
+    <div class="lav-kv"><span>Multa FGTS estimada</span><strong>R$ {{ '%.2f'|format(t.fgts_fine_est or 0) }}</strong></div>
     <div class="lav-kv"><span>INSS estimado</span><strong>R$ {{ '%.2f'|format(t.inss_est or 0) }}</strong></div>
     <div class="lav-kv"><span>IRRF estimado</span><strong>R$ {{ '%.2f'|format(t.irrf_est or 0) }}</strong></div>
     <div class="lav-kv"><span>Líquido estimado</span><strong>R$ {{ '%.2f'|format(t.net_est or 0) }}</strong></div>
+    {% if checklist %}
+    <hr>
+    <div class="fw-bold mb-1">Checklist guiado (CLT)</div>
+    {% for item in checklist %}
+    <div class="small">• {{ item }}</div>
+    {% endfor %}
+    {% endif %}
     <div class="small text-muted mt-2">Observação: recibo didático para conferência interna.</div>
   </div>
 </div>

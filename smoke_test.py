@@ -341,6 +341,77 @@ def main() -> int:
     if not thirteenth_count_re:
         raise RuntimeError("Close page missing 13th count")
 
+    print("[7.6.1] Register leave and validate listing")
+    _request(
+        opener,
+        "POST",
+        f"/payroll/employees/{deise_id}/leaves",
+        {
+            "year": str(test_year),
+            "month": str(test_month),
+            "leave_type": "medical",
+            "start_date": f"{test_year}-{test_month:02d}-10",
+            "end_date": f"{test_year}-{test_month:02d}-12",
+            "paid_by": "company",
+            "reason": "Atestado curto",
+        },
+    )
+    leave_page = _request(
+        opener,
+        "GET",
+        f"/payroll/employees/{deise_id}/leaves?year={test_year}&month={test_month}",
+    ).read().decode("utf-8", errors="replace")
+    if "Afastamentos" not in leave_page:
+        raise RuntimeError("Leaves page title not found")
+    if "medical" not in leave_page:
+        raise RuntimeError("Leave type not found in listing")
+
+    print("[7.6.2] Register termination and validate receipt/checklist")
+    _request(
+        opener,
+        "POST",
+        f"/payroll/employees/{juvenaldo_id}/terminations",
+        {
+            "year": str(test_year),
+            "month": str(test_month),
+            "termination_date": f"{test_year}-{test_month:02d}-20",
+            "termination_type": "agreement",
+            "notice_type": "worked",
+            "notice_days": "30",
+            "gross_total": "3200,00",
+            "fgts_balance_est": "1000,00",
+            "fgts_fine_rate": "0,20",
+            "reason": "Teste acordo",
+        },
+    )
+    term_page = _request(
+        opener,
+        "GET",
+        f"/payroll/employees/{juvenaldo_id}/terminations?year={test_year}&month={test_month}",
+    ).read().decode("utf-8", errors="replace")
+    if "Rescisões" not in term_page:
+        raise RuntimeError("Terminations page title not found")
+    term_id_match = re.search(r"/terminations/(\d+)/receipt", term_page)
+    if not term_id_match:
+        raise RuntimeError("Could not find termination receipt link")
+    term_id = int(term_id_match.group(1))
+    term_receipt = _request(opener, "GET", f"/payroll/terminations/{term_id}/receipt").read().decode("utf-8", errors="replace")
+    if "Recibo de Rescisão" not in term_receipt:
+        raise RuntimeError("Termination receipt title not found")
+    if "Checklist guiado" not in term_receipt:
+        raise RuntimeError("Termination checklist not found")
+
+    print("[7.6.3] Validate leave/termination in closing summary")
+    close_page_events = _request(
+        opener,
+        "GET",
+        f"/payroll/close?year={test_year}&month={test_month}",
+    ).read().decode("utf-8", errors="replace")
+    if "Rescisões no mês" not in close_page_events:
+        raise RuntimeError("Close page missing terminations section")
+    if "Afastamentos no mês" not in close_page_events:
+        raise RuntimeError("Close page missing leaves section")
+
     print("[7.7] Register one revenue note")
     _request(
         opener,

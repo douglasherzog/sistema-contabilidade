@@ -465,6 +465,38 @@ def register_commands(app: Flask) -> None:
                     f"Rescisão registrada mas funcionário permanece ativo (termination_id={t.id}, employee_id={t.employee_id})."
                 )
 
+            expected_fgts_rate = Decimal("0")
+            if t.termination_type == "without_cause":
+                expected_fgts_rate = Decimal("0.40")
+                if t.notice_type == "none":
+                    issues.append(
+                        f"Rescisão sem justa causa sem aviso prévio definido (termination_id={t.id})."
+                    )
+            elif t.termination_type == "agreement":
+                expected_fgts_rate = Decimal("0.20")
+                if t.notice_type == "none":
+                    issues.append(
+                        f"Rescisão por acordo sem aviso prévio definido (termination_id={t.id})."
+                    )
+
+            fgts_balance = Decimal(str(t.fgts_balance_est or 0))
+            fgts_rate = Decimal(str(t.fgts_fine_rate or 0))
+            fgts_fine = Decimal(str(t.fgts_fine_est or 0))
+            if expected_fgts_rate > 0 and fgts_balance > 0:
+                if fgts_rate <= 0:
+                    issues.append(
+                        f"Rescisão sem alíquota de multa FGTS configurada (termination_id={t.id})."
+                    )
+                elif abs(fgts_rate - expected_fgts_rate) > Decimal("0.0001"):
+                    issues.append(
+                        f"Rescisão com alíquota FGTS divergente (termination_id={t.id}, esperada={expected_fgts_rate}, informada={fgts_rate})."
+                    )
+                expected_fine = (fgts_balance * expected_fgts_rate).quantize(Decimal("0.01"))
+                if abs(fgts_fine - expected_fine) > Decimal("0.05"):
+                    issues.append(
+                        f"Rescisão com multa FGTS divergente (termination_id={t.id}, esperada={expected_fine}, informada={fgts_fine})."
+                    )
+
         # 5) Afastamentos - consistência e regra simplificada INSS (>15 dias médicos)
         leaves = EmployeeLeave.query.filter_by(year=target_year).all()
         for lv in leaves:

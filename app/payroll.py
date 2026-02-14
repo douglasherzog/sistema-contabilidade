@@ -461,6 +461,40 @@ def _calc_thirteenth_amount(base_salary: Decimal, months_worked: int) -> dict:
     }
 
 
+def _termination_expected_fgts_rate(termination_type: str) -> Decimal:
+    t = (termination_type or "").strip().lower()
+    if t == "without_cause":
+        return Decimal("0.40")
+    if t == "agreement":
+        return Decimal("0.20")
+    return Decimal("0")
+
+
+def _termination_guided_checklist(termination_type: str, notice_type: str) -> list[str]:
+    t = (termination_type or "").strip().lower()
+    n = (notice_type or "").strip().lower()
+    items: list[str] = [
+        "Conferir saldo de salário e férias (vencidas/proporcionais + 1/3).",
+        "Emitir TRCT e termo de quitação para assinatura.",
+        "Conferir lançamentos de eSocial/SEFIP/FGTS Digital conforme competência.",
+    ]
+    if t in ("without_cause", "agreement"):
+        if n == "none":
+            items.append("Definir aviso prévio (trabalhado ou indenizado) conforme CLT.")
+        else:
+            items.append(f"Aviso prévio informado: {n}.")
+    if t == "without_cause":
+        items.append("Aplicar multa de 40% do FGTS (quando houver saldo).")
+        items.append("Gerar chave de conectividade e avaliar seguro-desemprego.")
+    elif t == "agreement":
+        items.append("Aplicar multa de 20% do FGTS (rescisão por acordo).")
+    elif t == "with_cause":
+        items.append("Sem aviso indenizado e sem multa FGTS (justa causa).")
+    elif t == "resignation":
+        items.append("Pedido de demissão: validar aviso prévio conforme política aplicável.")
+    return items
+
+
 def _calc_thirteenth_month_summary(year: int, month: int) -> dict:
     """Resumo de 13º registrados na competência."""
     rows = EmployeeThirteenth.query.filter_by(payment_year=int(year), payment_month=int(month)).all()
@@ -623,8 +657,12 @@ def employee_terminations_add(employee_id: int):
     month = int(request.form.get("month") or 0)
     termination_date = _parse_date(request.form.get("termination_date"))
     termination_type = (request.form.get("termination_type") or "").strip().lower()
+    notice_type = (request.form.get("notice_type") or "none").strip().lower()
+    notice_days = int(request.form.get("notice_days") or 0)
     reason = (request.form.get("reason") or "").strip() or None
     gross_total = _to_decimal(request.form.get("gross_total"))
+    fgts_balance_est = _to_decimal(request.form.get("fgts_balance_est"), default=Decimal("0"))
+    fgts_fine_rate_in = _to_decimal(request.form.get("fgts_fine_rate"), default=Decimal("-1"))
 
     if year < 2000 or month < 1 or month > 12 or not termination_date:
         flash("Dados da rescisão inválidos.", "warning")
@@ -632,6 +670,12 @@ def employee_terminations_add(employee_id: int):
 
     if termination_type not in ("without_cause", "with_cause", "agreement", "resignation"):
         flash("Tipo de rescisão inválido.", "warning")
+        return redirect(url_for("payroll.employee_terminations", employee_id=e.id, year=year, month=month))
+    if notice_type not in ("worked", "indemnified", "none"):
+        flash("Tipo de aviso prévio inválido.", "warning")
+        return redirect(url_for("payroll.employee_terminations", employee_id=e.id, year=year, month=month))
+    if notice_days < 0 or notice_days > 120:
+        flash("Dias de aviso prévio inválidos.", "warning")
         return redirect(url_for("payroll.employee_terminations", employee_id=e.id, year=year, month=month))
 
     inss_est = None
@@ -649,14 +693,28 @@ def employee_terminations_add(employee_id: int):
     if inss_est is not None and irrf_est is not None:
         net_est = (gross_total - inss_est - irrf_est).quantize(Decimal("0.01"))
 
+    expected_rate = _termination_expected_fgts_rate(termination_type)
+    if fgts_fine_rate_in < 0:
+        fgts_fine_rate = expected_rate
+    else:
+        fgts_fine_rate = fgts_fine_rate_in
+    fgts_fine_est = None
+    if fgts_balance_est > 0 and fgts_fine_rate > 0:
+        fgts_fine_est = (fgts_balance_est * fgts_fine_rate).quantize(Decimal("0.01"))
+
     row = EmployeeTermination(
         employee_id=e.id,
         year=year,
         month=month,
         termination_date=termination_date,
         termination_type=termination_type,
+        notice_type=notice_type,
+        notice_days=notice_days,
         reason=reason,
         gross_total=gross_total,
+        fgts_balance_est=fgts_balance_est,
+        fgts_fine_rate=fgts_fine_rate,
+        fgts_fine_est=fgts_fine_est,
         inss_est=inss_est,
         irrf_est=irrf_est,
         net_est=net_est,
@@ -674,7 +732,8 @@ def employee_terminations_add(employee_id: int):
 @login_required
 def termination_receipt(termination_id: int):
     t = EmployeeTermination.query.get_or_404(termination_id)
-    return render_template("payroll/termination_receipt.html", t=t, employee=t.employee)
+    checklist = _termination_guided_checklist(t.termination_type, t.notice_type)
+    return render_template("payroll/termination_receipt.html", t=t, employee=t.employee, checklist=checklist)
 
 
 @payroll_bp.get("/employees/<int:employee_id>/leaves")
