@@ -65,6 +65,84 @@
 <div class="card mb-3">
   <div class="card-body">
     <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Compliance-check (auditoria rápida)</h2>
+      <div class="lav-meta">Verifica regras trabalhistas e consistência fiscal antes do fechamento</div>
+    </div>
+    <div class="small lav-subtitle mb-3">
+      Use primeiro o modo padrão para auditar. Se as tabelas INSS/IRRF estiverem incompletas, você pode habilitar a atualização automática durante a checagem.
+    </div>
+
+    <form method="post" action="{{ url_for('payroll.close_run_compliance') }}" class="d-flex gap-2 flex-wrap">
+      <input type="hidden" name="year" value="{{ year }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      <button class="btn btn-outline-primary" type="submit" name="apply_sync" value="0">Rodar compliance-check</button>
+      <button class="btn btn-primary" type="submit" name="apply_sync" value="1">Rodar + atualizar tabelas fiscais</button>
+    </form>
+
+    {% if compliance_result %}
+      <hr>
+      <div class="small mb-2">
+        {% if compliance_result.ok %}
+          <span class="badge text-bg-success">Sem alertas</span>
+        {% else %}
+          <span class="badge text-bg-warning">{{ compliance_result.issues_count }} alerta(s)</span>
+        {% endif %}
+      </div>
+
+      {% if compliance_result.sync_report_lines %}
+        <label class="form-label" for="sync_report_close">Relatório da atualização fiscal</label>
+        <textarea id="sync_report_close" class="form-control mb-2" rows="8" readonly>{% for ln in compliance_result.sync_report_lines %}{{ ln }}
+{% endfor %}</textarea>
+      {% endif %}
+
+      <label class="form-label" for="compliance_report_close">Relatório do compliance-check</label>
+      <textarea id="compliance_report_close" class="form-control" rows="8" readonly>{% for ln in compliance_result.report_lines %}{{ ln }}
+{% endfor %}</textarea>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Prazos legais do mês (semáforo)</h2>
+      <div class="lav-meta">Verde = no prazo, amarelo = vence em breve, vermelho = atrasado</div>
+    </div>
+    <div class="small lav-subtitle mb-3">
+      Estes prazos apoiam sua rotina de fechamento. Quando houver guia oficial com vencimento preenchido, ela prevalece no cálculo de status.
+    </div>
+
+    <div class="row g-3">
+      {% for item in legal_deadlines %}
+      <div class="col-lg-4">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+              <h3 class="h6 mb-1">{{ item.title }}</h3>
+              {% if item.status == 'danger' %}
+                <span class="badge text-bg-danger">Atrasado</span>
+              {% elif item.status == 'warning' %}
+                <span class="badge text-bg-warning">Vence em breve</span>
+              {% else %}
+                <span class="badge text-bg-success">No prazo</span>
+              {% endif %}
+            </div>
+
+            <div class="small text-muted">Vencimento: {{ item.due_date|fmt_date }}</div>
+            <div class="small text-muted">Pago em: {{ item.paid_at|fmt_date }}</div>
+            <div class="small mt-2">{{ item.note }}</div>
+            <div class="lav-meta mt-2">{{ item.source }}</div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
       <h2 class="h6 mb-0">Checklist guiado</h2>
       <div class="lav-meta">Objetivo: deixar tudo conferido antes de pagar.</div>
     </div>

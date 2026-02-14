@@ -22,6 +22,42 @@
   </div>
 </div>
 
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Sincronização oficial (INSS/IRRF)</h2>
+      <div class="lav-meta">Disparo disponível nesta tela (sem precisar CLI)</div>
+    </div>
+
+    <div class="small lav-subtitle mb-3">
+      <strong>Fontes oficiais consultadas:</strong><br>
+      1) INSS (gov.br): página de tabela de contribuição mensal.<br>
+      2) INSS fallback (gov.br): notícia oficial e/ou portaria em PDF do ano.<br>
+      3) IRRF (Receita/gov.br): tabela anual (dedução por dependente + faixas mensais).<br><br>
+      <strong>Como o sistema faz:</strong> tenta extração HTML primeiro, aplica validações de segurança (quantidade mínima de faixas) e só grava no banco quando você clica em <em>Aplicar</em>.
+    </div>
+
+    <form method="post" action="{{ url_for('payroll.tax_sync_trigger') }}" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label" for="sync_target_year">Ano alvo</label>
+        <input class="form-control" id="sync_target_year" name="target_year" type="number" min="2000" max="9999" value="{{ (sync_result.target_year if sync_result else '') or '' }}" placeholder="ex.: 2026" required>
+      </div>
+      <div class="col-md-9 d-flex gap-2 flex-wrap">
+        <button class="btn btn-outline-primary" type="submit" name="mode" value="dry_run">Simular busca (dry-run)</button>
+        <button class="btn btn-primary" type="submit" name="mode" value="apply">Aplicar no banco</button>
+      </div>
+    </form>
+
+    {% if sync_result and sync_result.report_lines %}
+    <div class="mt-3">
+      <label class="form-label" for="sync_report">Relatório da sincronização</label>
+      <textarea id="sync_report" class="form-control" rows="12" readonly>{% for ln in sync_result.report_lines %}{{ ln }}
+{% endfor %}</textarea>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
 <div class="row g-3">
   <div class="col-lg-6">
     <div class="card h-100">

@@ -21,6 +21,15 @@ SMOKE_SKIP_DOCKER_SYNC=1 python smoke_test.py
 - `docker compose exec web_dev flask sync-taxes`
 - `docker compose exec web_dev flask sync-taxes --apply`
 
+### Validação via interface (novo)
+
+1. Abrir `http://localhost:8010/payroll/config/taxes`
+2. Informar ano (ex.: 2026)
+3. Clicar em **Simular busca (dry-run)**
+   - Esperado: relatório com fontes usadas + faixas; sem gravação no banco
+4. Clicar em **Aplicar no banco**
+   - Esperado: flash de sucesso e persistência em `TaxInssBracket`, `TaxIrrfBracket`, `TaxIrrfConfig`
+
 ## Regra do projeto (obrigatória)
 
 - Smoke e validações automatizadas: **sempre no ambiente de testes** (`web_dev`/`db_dev`, porta `8010`).

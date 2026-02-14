@@ -26,6 +26,7 @@ from .models import (
     TaxIrrfBracket,
     TaxIrrfConfig,
 )
+from .tax_sync import run_compliance_check, run_tax_sync
 
 
 payroll_bp = Blueprint("payroll", __name__, url_prefix="/payroll")
@@ -223,7 +224,7 @@ TUTORIALS: dict[str, dict] = {
             {"name": "Dedução IRRF", "explain": "Dedução por dependente e parcela a deduzir."},
         ],
         "steps": [
-            "Preferencialmente rode sync-taxes/compliance-check por CLI.",
+            "Use o bloco 'Sincronização oficial' para executar dry-run e aplicar tabelas diretamente na tela.",
             "Se necessário, ajuste manualmente e reconfira no holerite/fechamento.",
         ],
     },
@@ -1378,10 +1379,53 @@ def payroll_holerite(run_id: int, employee_id: int):
 @payroll_bp.get("/config/taxes")
 @login_required
 def tax_config():
+    context = _tax_config_context()
+    return render_template("payroll/tax_config.html", **context)
+
+
+def _tax_config_context() -> dict:
     inss_rows = TaxInssBracket.query.order_by(TaxInssBracket.effective_from.desc(), TaxInssBracket.up_to.asc().nullslast()).all()
     irrf_rows = TaxIrrfBracket.query.order_by(TaxIrrfBracket.effective_from.desc(), TaxIrrfBracket.up_to.asc().nullslast()).all()
     irrf_configs = TaxIrrfConfig.query.order_by(TaxIrrfConfig.effective_from.desc()).all()
-    return render_template("payroll/tax_config.html", inss_rows=inss_rows, irrf_rows=irrf_rows, irrf_configs=irrf_configs)
+    return {
+        "inss_rows": inss_rows,
+        "irrf_rows": irrf_rows,
+        "irrf_configs": irrf_configs,
+    }
+
+
+@payroll_bp.post("/config/taxes/sync")
+@login_required
+def tax_sync_trigger():
+    try:
+        target_year = int(request.form.get("target_year") or date.today().year)
+    except (TypeError, ValueError):
+        target_year = 0
+    mode = (request.form.get("mode") or "dry_run").strip().lower()
+    apply_changes = mode == "apply"
+
+    if target_year < 2000 or target_year > 9999:
+        flash("Ano inválido para sincronização fiscal.", "warning")
+        context = _tax_config_context()
+        return render_template("payroll/tax_config.html", **context, sync_result=None)
+
+    sync_result = None
+    try:
+        sync_result = run_tax_sync(target_year=target_year, apply_changes=apply_changes)
+        if sync_result.get("applied"):
+            flash("Sincronização concluída e tabelas fiscais gravadas no banco.", "success")
+        else:
+            flash("Simulação concluída (dry-run). Revise o relatório antes de aplicar.", "info")
+    except Exception as e:
+        flash(f"Falha na sincronização fiscal: {e}", "warning")
+        sync_result = {
+            "target_year": target_year,
+            "applied": False,
+            "report_lines": [f"ERRO: {e}"],
+        }
+
+    context = _tax_config_context()
+    return render_template("payroll/tax_config.html", **context, sync_result=sync_result)
 
 
 @payroll_bp.post("/config/taxes/inss")
@@ -1459,6 +1503,106 @@ def tax_irrf_add():
     return redirect(url_for("payroll.tax_config"))
 
 
+def _next_month(year: int, month: int) -> tuple[int, int]:
+    if int(month) == 12:
+        return int(year) + 1, 1
+    return int(year), int(month) + 1
+
+
+def _deadline_status(today: date, due_date: date | None, paid_at: date | None) -> str:
+    if paid_at:
+        return "ok"
+    if due_date is None:
+        return "pending"
+    days_left = (due_date - today).days
+    if days_left < 0:
+        return "danger"
+    if days_left <= 3:
+        return "warning"
+    return "ok"
+
+
+def _build_legal_deadlines(year: int, month: int, docs: dict[str, GuideDocument | None]) -> list[dict]:
+    today = date.today()
+    ny, nm = _next_month(year, month)
+    default_due = date(int(ny), int(nm), 20)
+
+    items = [
+        {
+            "key": "das",
+            "title": "DAS (Simples Nacional)",
+            "source": "Prazo operacional padrão: dia 20 do mês seguinte (confira a guia oficial).",
+        },
+        {
+            "key": "fgts",
+            "title": "FGTS Digital",
+            "source": "Prazo operacional padrão: dia 20 do mês seguinte (confira a guia oficial).",
+        },
+        {
+            "key": "darf",
+            "title": "DARF (encargos folha)",
+            "source": "Prazo operacional padrão: dia 20 do mês seguinte (confira a guia oficial).",
+        },
+    ]
+
+    out: list[dict] = []
+    for item in items:
+        doc = docs.get(item["key"])
+        due_date = (getattr(doc, "due_date", None) if doc else None) or default_due
+        paid_at = getattr(doc, "paid_at", None) if doc else None
+        status = _deadline_status(today=today, due_date=due_date, paid_at=paid_at)
+
+        if paid_at:
+            note = "Pago"
+        elif status == "danger":
+            note = "Atrasado"
+        elif status == "warning":
+            note = "Vence em breve"
+        else:
+            note = "No prazo"
+
+        out.append(
+            {
+                "title": item["title"],
+                "due_date": due_date,
+                "paid_at": paid_at,
+                "status": status,
+                "note": note,
+                "source": item["source"],
+            }
+        )
+
+    if int(month) == 11:
+        due_13_first = date(int(year), 11, 30)
+        status_13_first = _deadline_status(today=today, due_date=due_13_first, paid_at=None)
+        out.append(
+            {
+                "title": "13º salário - 1ª parcela",
+                "due_date": due_13_first,
+                "paid_at": None,
+                "status": status_13_first,
+                "note": "Conferir se todos os funcionários elegíveis receberam a 1ª parcela.",
+                "source": "Regra CLT: até 30/11.",
+            }
+        )
+
+    if int(month) == 12:
+        due_13_second = date(int(year), 12, 20)
+        status_13_second = _deadline_status(today=today, due_date=due_13_second, paid_at=None)
+        out.append(
+            {
+                "title": "13º salário - 2ª parcela",
+                "due_date": due_13_second,
+                "paid_at": None,
+                "status": status_13_second,
+                "note": "Conferir se todos os funcionários elegíveis receberam a 2ª parcela.",
+                "source": "Regra CLT: até 20/12.",
+            }
+        )
+
+    return out
+
+
 @payroll_bp.get("/close")
 @login_required
 def close_home():
@@ -1478,6 +1622,9 @@ def close_home():
         "das": GuideDocument.query.filter_by(year=year, month=month, doc_type="das").first(),
         "fgts": GuideDocument.query.filter_by(year=year, month=month, doc_type="fgts").first(),
     }
+    legal_deadlines = _build_legal_deadlines(year=year, month=month, docs=docs)
+    compliance_session_key = f"payroll_close_compliance:{year}-{month}"
+    compliance_result = session.pop(compliance_session_key, None)
 
     summary = _calc_month_summary(run)
     revenue_summary = _calc_revenue_month_summary(year, month)
@@ -1573,12 +1720,52 @@ def close_home():
         closed=closed,
         checklist=checklist,
         summary=summary,
+        legal_deadlines=legal_deadlines,
+        compliance_result=compliance_result,
         revenue_summary=revenue_summary,
         vacations_summary=vacations_summary,
         thirteenth_summary=thirteenth_summary,
         terminations_summary=terminations_summary,
         leaves_summary=leaves_summary,
     )
+
+
+@payroll_bp.post("/close/compliance")
+@login_required
+def close_run_compliance():
+    year = int(request.form.get("year") or 0)
+    month = int(request.form.get("month") or 0)
+    apply_sync = (request.form.get("apply_sync") or "0") == "1"
+
+    if year < 2000 or month < 1 or month > 12:
+        flash("Competência inválida para compliance-check.", "warning")
+        return redirect(url_for("payroll.close_home"))
+
+    try:
+        result = run_compliance_check(target_year=year, apply_tax_sync=apply_sync)
+        if result.get("ok"):
+            flash("Compliance-check concluído sem alertas.", "success")
+        else:
+            flash(f"Compliance-check encontrou {len(result.get('issues') or [])} alerta(s).", "warning")
+
+        session[f"payroll_close_compliance:{year}-{month}"] = {
+            "target_year": year,
+            "ok": bool(result.get("ok")),
+            "issues_count": len(result.get("issues") or []),
+            "report_lines": list(result.get("report_lines") or []),
+            "sync_report_lines": list(result.get("sync_report_lines") or []),
+        }
+    except Exception as e:
+        flash(f"Falha ao executar compliance-check: {e}", "warning")
+        session[f"payroll_close_compliance:{year}-{month}"] = {
+            "target_year": year,
+            "ok": False,
+            "issues_count": 1,
+            "report_lines": [f"ERRO: {e}"],
+            "sync_report_lines": [],
+        }
+
+    return redirect(url_for("payroll.close_home", year=year, month=month))
 
 
 @payroll_bp.get("/revenue")
