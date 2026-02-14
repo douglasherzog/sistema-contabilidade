@@ -1,10 +1,65 @@
 :root {
   --lav-card-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 1px rgba(16, 24, 40, 0.04);
   --lav-border: rgba(16, 24, 40, 0.10);
+  --lav-text-muted: rgba(16, 24, 40, 0.60);
+  --lav-primary-soft: rgba(13, 110, 253, 0.10);
+  --lav-success-soft: rgba(25, 135, 84, 0.10);
+  --lav-warning-soft: rgba(255, 193, 7, 0.18);
 }
 
 body {
   text-rendering: optimizeLegibility;
+}
+
+.lav-page-header {
+  margin-bottom: 1rem;
+}
+
+.lav-page-title {
+  letter-spacing: -0.01em;
+}
+
+.lav-subtitle {
+  color: var(--lav-text-muted);
+}
+
+.lav-callout {
+  border: 1px solid var(--lav-border);
+  border-radius: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  background: #fff;
+}
+
+.lav-callout.is-warning {
+  background: var(--lav-warning-soft);
+}
+
+.lav-callout.is-info {
+  background: var(--lav-primary-soft);
+}
+
+.lav-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.lav-check-card {
+  border-left: 4px solid var(--lav-border);
+}
+
+.lav-check-card.is-ok {
+  border-left-color: rgba(25, 135, 84, 0.6);
+}
+
+.lav-check-card.is-pending {
+  border-left-color: rgba(255, 193, 7, 0.8);
+}
+
+.lav-meta {
+  color: var(--lav-text-muted);
+  font-size: 0.875rem;
 }
 
 .navbar {

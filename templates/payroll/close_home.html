@@ -1,42 +1,49 @@
 {% extends 'base.html' %}
 {% block title %}Fechamento - Sistema Contabilidade{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
-  <div>
-    <h1 class="h4 mb-0">Fechamento</h1>
-    <div class="text-muted small">Checklist do mês para você conferir se está tudo pronto antes de pagar as guias e encerrar a competência.</div>
+<div class="lav-page-header">
+  <div class="lav-section-title">
+    <div>
+      <h1 class="h4 mb-1 lav-page-title">Fechamento</h1>
+      <div class="small lav-subtitle">Checklist do mês para você conferir se está tudo pronto antes de pagar as guias e encerrar a competência.</div>
+    </div>
+    <div class="d-flex gap-2">
+      {% if closed %}
+        <form method="post" action="{{ url_for('payroll.close_reopen') }}">
+          <input type="hidden" name="year" value="{{ year }}">
+          <input type="hidden" name="month" value="{{ month }}">
+          <button class="btn btn-outline-secondary" type="submit">Reabrir competência</button>
+        </form>
+      {% else %}
+        <form method="post" action="{{ url_for('payroll.close_mark') }}">
+          <input type="hidden" name="year" value="{{ year }}">
+          <input type="hidden" name="month" value="{{ month }}">
+          <button class="btn btn-primary" type="submit">Marcar como fechada</button>
+        </form>
+      {% endif %}
+    </div>
   </div>
-  <div class="d-flex gap-2">
-    {% if closed %}
-      <form method="post" action="{{ url_for('payroll.close_reopen') }}">
-        <input type="hidden" name="year" value="{{ year }}">
-        <input type="hidden" name="month" value="{{ month }}">
-        <button class="btn btn-outline-secondary" type="submit">Reabrir competência</button>
-      </form>
-    {% else %}
-      <form method="post" action="{{ url_for('payroll.close_mark') }}">
-        <input type="hidden" name="year" value="{{ year }}">
-        <input type="hidden" name="month" value="{{ month }}">
-        <button class="btn btn-primary" type="submit">Marcar como fechada</button>
-      </form>
-    {% endif %}
-  </div>
-</div>
 
-{% if closed %}
-  <div class="alert alert-warning">
-    <strong>Competência marcada como FECHADA.</strong>
-    <div class="small">Isso não bloqueia alterações, mas o sistema vai te avisar quando você mexer em dados do mês para evitar inconsistências.</div>
-  </div>
-{% else %}
-  <div class="alert alert-light border">
-    <strong>Competência em aberto.</strong>
-    <div class="small text-muted">Quando tudo estiver OK no checklist abaixo, você pode marcar como fechada para organização.</div>
-  </div>
-{% endif %}
+  {% if closed %}
+    <div class="lav-callout is-warning mt-3">
+      <strong>Competência marcada como FECHADA.</strong>
+      <div class="small">Isso não bloqueia alterações, mas o sistema vai te avisar quando você mexer em dados do mês para evitar inconsistências.</div>
+    </div>
+  {% else %}
+    <div class="lav-callout mt-3">
+      <strong>Competência em aberto.</strong>
+      <div class="small lav-subtitle">Quando tudo estiver OK no checklist abaixo, você pode marcar como fechada para organização.</div>
+    </div>
+  {% endif %}
+</div>
 
 <div class="card mb-3">
   <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Competência</h2>
+      <div class="lav-meta">Use este seletor para abrir outro mês/ano.</div>
+    </div>
+
     <form method="get" action="{{ url_for('payroll.close_home') }}" class="row g-2 align-items-end">
       <div class="col-md-3">
         <label class="form-label" for="year">Ano</label>
@@ -53,39 +60,52 @@
   </div>
 </div>
 
-<div class="row g-3 mb-3">
-  {% for key, item in checklist.items() %}
-  <div class="col-lg-4">
-    <div class="card h-100">
-      <div class="card-body">
-        <div class="d-flex justify-content-between align-items-start">
-          <h2 class="h6 mb-1">{{ item.title }}</h2>
-          {% if item.ok %}
-            <span class="badge text-bg-success">OK</span>
-          {% else %}
-            <span class="badge text-bg-warning">Pendente</span>
-          {% endif %}
-        </div>
-        <div class="small text-muted mb-3">{{ item.help }}</div>
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Checklist guiado</h2>
+      <div class="lav-meta">Objetivo: deixar tudo conferido antes de pagar.</div>
+    </div>
+    <div class="small lav-subtitle mb-3">Cada card abaixo diz o que está pendente e te leva direto para a tela certa.</div>
 
-        {% if key == 'taxes' and item.meta %}
-          <div class="small text-muted mb-3">
-            INSS: {{ item.meta.inss_eff|fmt_date }}<br>
-            IRRF: {{ item.meta.irrf_eff|fmt_date }}
+    <div class="row g-3">
+      {% for key, item in checklist.items() %}
+      <div class="col-lg-4">
+        <div class="card h-100 lav-check-card {% if item.ok %}is-ok{% else %}is-pending{% endif %}">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+              <h3 class="h6 mb-1">{{ item.title }}</h3>
+              {% if item.ok %}
+                <span class="badge text-bg-success">OK</span>
+              {% else %}
+                <span class="badge text-bg-warning">Pendente</span>
+              {% endif %}
+            </div>
+            <div class="small lav-subtitle mb-3">{{ item.help }}</div>
+
+            {% if key == 'taxes' and item.meta %}
+              <div class="lav-meta mb-3">
+                INSS: {{ item.meta.inss_eff|fmt_date }}<br>
+                IRRF: {{ item.meta.irrf_eff|fmt_date }}
+              </div>
+            {% endif %}
+
+            <a class="btn btn-sm btn-outline-primary" href="{{ item.action_url }}">{{ item.action_label }}</a>
           </div>
-        {% endif %}
-
-        <a class="btn btn-sm btn-outline-primary" href="{{ item.action_url }}">{{ item.action_label }}</a>
+        </div>
       </div>
+      {% endfor %}
     </div>
   </div>
-  {% endfor %}
 </div>
 
 <div class="card mb-3">
   <div class="card-body">
-    <h2 class="h6 mb-2">Resumo do mês (estimativa)</h2>
-    <div class="text-muted small mb-3">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Resumo do mês (estimativa)</h2>
+      <div class="lav-meta">Conferência rápida</div>
+    </div>
+    <div class="small lav-subtitle mb-3">
       Este resumo ajuda você a conferir o mês rapidamente. Os valores de INSS/IRRF aqui são <strong>estimativas</strong> baseadas na folha e nas tabelas configuradas.
     </div>
 
@@ -136,7 +156,7 @@
             {% endif %}
           </div>
         </div>
-        <div class="small text-muted text-end">
+        <div class="lav-meta text-end">
           INSS: {{ summary.inss_eff|fmt_date }}<br>
           IRRF: {{ summary.irrf_eff|fmt_date }}
         </div>
@@ -145,7 +165,15 @@
   </div>
 </div>
 
-<div class="row g-3">
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Guias do mês</h2>
+      <div class="lav-meta">DAS, FGTS e Previdência</div>
+    </div>
+    <div class="small lav-subtitle mb-3">Objetivo: centralizar PDFs e valores para você conferir antes de pagar.</div>
+
+    <div class="row g-3">
   {% for dtype, label in { 'darf': 'DARF (Receita Federal)', 'das': 'DAS (Simples Nacional)', 'fgts': 'FGTS Digital (GFD)' }.items() %}
   {% set doc = docs.get(dtype) %}
   <div class="col-lg-4">
@@ -166,7 +194,7 @@
           <div class="small text-muted">Vencimento: {{ doc.due_date|fmt_date }}</div>
           <div class="small text-muted mb-3">Pago em: {{ doc.paid_at|fmt_date }}</div>
         {% else %}
-          <div class="text-muted small mb-3">Nenhum PDF anexado.</div>
+          <div class="text-muted small mb-3">Nenhuma informação registrada ainda.</div>
         {% endif %}
 
         <form method="post" action="{{ url_for('payroll.close_upload') }}" enctype="multipart/form-data">
@@ -196,5 +224,7 @@
     </div>
   </div>
   {% endfor %}
+</div>
+  </div>
 </div>
 {% endblock %}
