@@ -105,3 +105,7 @@ body {
 .lav-signature-line {
   height: 28px;
 }
+
+.lav-callout .btn {
+  box-shadow: none;
+}

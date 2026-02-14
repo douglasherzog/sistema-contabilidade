@@ -1,10 +1,147 @@
 {% extends 'base.html' %}
 {% block title %}Início - Sistema Contabilidade{% endblock %}
 {% block content %}
+<div class="lav-page-header">
+  <div>
+    <h1 class="h4 mb-1 lav-page-title">Painel do mês</h1>
+    <div class="small lav-subtitle">Uma visão rápida do que está pendente para fechar a competência com segurança.</div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Competência</h2>
+      <div class="lav-meta">Mês atual por padrão, mas você pode selecionar outro.</div>
+    </div>
+
+    <form method="get" action="{{ url_for('main.index') }}" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label" for="year">Ano</label>
+        <input class="form-control" id="year" name="year" value="{{ year }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="month">Mês</label>
+        <input class="form-control" id="month" name="month" value="{{ month }}" required>
+      </div>
+      <div class="col-md-6">
+        {% if status.competence.closed %}
+          <div class="lav-meta">Status: <strong>fechada</strong> (com aviso)</div>
+        {% else %}
+          <div class="lav-meta">Status: <strong>em aberto</strong></div>
+        {% endif %}
+      </div>
+      <div class="col-12">
+        <button class="btn btn-outline-secondary" type="submit">Abrir competência</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="lav-callout is-info mb-3">
+  <strong>Próximo passo sugerido</strong>
+  <div class="small">{{ next_step.help }}</div>
+  <div class="mt-2">
+    <a class="btn btn-sm btn-primary" href="{{ next_step.url }}">{{ next_step.label }}</a>
+  </div>
+</div>
+
 <div class="card">
   <div class="card-body">
-    <h1 class="h4 mb-2">Bem-vindo</h1>
-    <div class="text-muted">Logado como: <strong>{{ user.email }}</strong></div>
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Status rápido</h2>
+      <div class="lav-meta">Objetivo: ver o que está OK e o que falta.</div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-4">
+        <div class="card h-100 lav-check-card {% if status.revenue.ok %}is-ok{% else %}is-pending{% endif %}">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+              <h3 class="h6 mb-1">Receitas / notas</h3>
+              {% if status.revenue.ok %}
+                <span class="badge text-bg-success">OK</span>
+              {% else %}
+                <span class="badge text-bg-warning">Pendente</span>
+              {% endif %}
+            </div>
+            <div class="small lav-subtitle mb-3">Registradas: <strong>{{ status.revenue.count }}</strong></div>
+            <a class="btn btn-sm btn-outline-primary" href="{{ status.revenue.action_url }}">Abrir Receitas</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-4">
+        <div class="card h-100 lav-check-card {% if status.payroll.ok %}is-ok{% else %}is-pending{% endif %}">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+              <h3 class="h6 mb-1">Folha</h3>
+              {% if status.payroll.ok %}
+                <span class="badge text-bg-success">OK</span>
+              {% else %}
+                <span class="badge text-bg-warning">Pendente</span>
+              {% endif %}
+            </div>
+            <div class="small lav-subtitle mb-3">Crie/abra a folha para lançar horas extras e gerar holerites.</div>
+            <a class="btn btn-sm btn-outline-primary" href="{{ status.payroll.action_url }}">Abrir Folha</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-4">
+        <div class="card h-100 lav-check-card {% if status.taxes.ok %}is-ok{% else %}is-pending{% endif %}">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+              <h3 class="h6 mb-1">Tabelas INSS/IRRF</h3>
+              {% if status.taxes.ok %}
+                <span class="badge text-bg-success">OK</span>
+              {% else %}
+                <span class="badge text-bg-warning">Pendente</span>
+              {% endif %}
+            </div>
+            <div class="lav-meta mb-3">
+              INSS: {{ status.taxes.inss_eff|fmt_date }}<br>
+              IRRF: {{ status.taxes.irrf_eff|fmt_date }}
+            </div>
+            <a class="btn btn-sm btn-outline-primary" href="{{ status.taxes.action_url }}">Config INSS/IRRF</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-6">
+        <div class="card h-100 lav-check-card {% if status.guides.ok %}is-ok{% else %}is-pending{% endif %}">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+              <h3 class="h6 mb-1">Guias (DAS/FGTS/DARF)</h3>
+              {% if status.guides.ok %}
+                <span class="badge text-bg-success">OK</span>
+              {% else %}
+                <span class="badge text-bg-warning">Pendente</span>
+              {% endif %}
+            </div>
+            <div class="small lav-subtitle mb-3">Centralize valores, vencimentos e PDFs para conferir antes de pagar.</div>
+            <a class="btn btn-sm btn-outline-primary" href="{{ status.guides.action_url }}">Abrir Fechamento</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-lg-6">
+        <div class="card h-100 lav-check-card {% if status.close.ok %}is-ok{% else %}is-pending{% endif %}">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+              <h3 class="h6 mb-1">Competência</h3>
+              {% if status.close.ok %}
+                <span class="badge text-bg-success">OK</span>
+              {% else %}
+                <span class="badge text-bg-warning">Pendente</span>
+              {% endif %}
+            </div>
+            <div class="small lav-subtitle mb-3">Quando estiver tudo conferido, marque como fechada para organização (com aviso).</div>
+            <a class="btn btn-sm btn-outline-primary" href="{{ status.close.action_url }}">Abrir Fechamento</a>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 {% endblock %}
