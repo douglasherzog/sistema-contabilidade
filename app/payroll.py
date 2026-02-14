@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
@@ -1603,6 +1603,179 @@ def _build_legal_deadlines(year: int, month: int, docs: dict[str, GuideDocument 
     return out
 
 
+def _reminder_label(days_left: int | None, paid_at: date | None) -> str:
+    if paid_at:
+        return "Concluido"
+    if days_left is None:
+        return "Sem vencimento definido"
+    if days_left < 0:
+        return f"Atrasado ha {abs(days_left)} dia(s)"
+    if days_left == 0:
+        return "Vence hoje (D-0)"
+    if days_left == 1:
+        return "Vence amanha (D-1)"
+    if days_left <= 3:
+        return f"Prazo critico (D-{days_left})"
+    if days_left <= 7:
+        return f"Planejar esta semana (D-{days_left})"
+    return f"No radar (D-{days_left})"
+
+
+def _agenda_bucket(days_left: int | None, paid_at: date | None) -> str:
+    if paid_at:
+        return "done"
+    if days_left is None:
+        return "next_7_days"
+    if days_left < 0:
+        return "overdue"
+    if days_left == 0:
+        return "today"
+    if days_left <= 7:
+        return "next_7_days"
+    return "later"
+
+
+def _agenda_resolution_steps(bucket: str, action_label: str, title: str) -> list[str]:
+    if bucket not in ("overdue", "today"):
+        return []
+    return [
+        f"1) Clique em '{action_label}' e abra o item: {title}.",
+        "2) Atualize os dados e confirme vencimento/pagamento para remover o alerta.",
+        "3) Rode o compliance-check para validar se a pendência foi resolvida.",
+    ]
+
+
+def _build_obligations_agenda(year: int, month: int, docs: dict[str, GuideDocument | None]) -> list[dict]:
+    today = date.today()
+    ny, nm = _next_month(year, month)
+    default_due = date(int(ny), int(nm), 20)
+
+    agenda_items: list[dict] = []
+    for key, title in (
+        ("das", "Emitir e conferir DAS"),
+        ("fgts", "Emitir e conferir FGTS Digital"),
+        ("darf", "Emitir e conferir DARF da folha"),
+    ):
+        doc = docs.get(key)
+        due_date = (getattr(doc, "due_date", None) if doc else None) or default_due
+        paid_at = getattr(doc, "paid_at", None) if doc else None
+        days_left = (due_date - today).days if due_date else None
+        bucket = _agenda_bucket(days_left=days_left, paid_at=paid_at)
+        action_label = "Abrir guias"
+        title_full = title
+        agenda_items.append(
+            {
+                "title": title_full,
+                "due_date": due_date,
+                "paid_at": paid_at,
+                "days_left": days_left,
+                "reminder": _reminder_label(days_left=days_left, paid_at=paid_at),
+                "bucket": bucket,
+                "action_url": url_for("payroll.close_home", year=year, month=month),
+                "action_label": action_label,
+                "why": "Evita atraso de encargos e reduz risco de multa/juros.",
+                "resolution_steps": _agenda_resolution_steps(bucket=bucket, action_label=action_label, title=title_full),
+            }
+        )
+
+    if int(month) == 11:
+        due_13_first = date(int(year), 11, 30)
+        days_left = (due_13_first - today).days
+        bucket = _agenda_bucket(days_left=days_left, paid_at=None)
+        action_label = "Ver funcionarios"
+        title_full = "Conferir pagamento da 1a parcela do 13o"
+        agenda_items.append(
+            {
+                "title": title_full,
+                "due_date": due_13_first,
+                "paid_at": None,
+                "days_left": days_left,
+                "reminder": _reminder_label(days_left=days_left, paid_at=None),
+                "bucket": bucket,
+                "action_url": url_for("payroll.employees"),
+                "action_label": action_label,
+                "why": "Ajuda a cumprir o prazo legal do 13o e evitar passivo trabalhista.",
+                "resolution_steps": _agenda_resolution_steps(bucket=bucket, action_label=action_label, title=title_full),
+            }
+        )
+    if int(month) == 12:
+        due_13_second = date(int(year), 12, 20)
+        days_left = (due_13_second - today).days
+        bucket = _agenda_bucket(days_left=days_left, paid_at=None)
+        action_label = "Ver funcionarios"
+        title_full = "Conferir pagamento da 2a parcela do 13o"
+        agenda_items.append(
+            {
+                "title": title_full,
+                "due_date": due_13_second,
+                "paid_at": None,
+                "days_left": days_left,
+                "reminder": _reminder_label(days_left=days_left, paid_at=None),
+                "bucket": bucket,
+                "action_url": url_for("payroll.employees"),
+                "action_label": action_label,
+                "why": "Ajuda a cumprir o prazo legal do 13o e evitar passivo trabalhista.",
+                "resolution_steps": _agenda_resolution_steps(bucket=bucket, action_label=action_label, title=title_full),
+            }
+        )
+
+    compliance_due = default_due - timedelta(days=2)
+    compliance_days_left = (compliance_due - today).days
+    compliance_bucket = _agenda_bucket(days_left=compliance_days_left, paid_at=None)
+    compliance_action = "Abrir fechamento"
+    compliance_title = "Rodar compliance-check final da competencia"
+    agenda_items.append(
+        {
+            "title": compliance_title,
+            "due_date": compliance_due,
+            "paid_at": None,
+            "days_left": compliance_days_left,
+            "reminder": _reminder_label(days_left=compliance_days_left, paid_at=None),
+            "bucket": compliance_bucket,
+            "action_url": url_for("payroll.close_home", year=year, month=month),
+            "action_label": compliance_action,
+            "why": "Detecta pendencias antes do vencimento das guias e evita retrabalho.",
+            "resolution_steps": _agenda_resolution_steps(bucket=compliance_bucket, action_label=compliance_action, title=compliance_title),
+        }
+    )
+
+    agenda_items.sort(key=lambda x: (x.get("due_date") is None, x.get("due_date") or date.max))
+    return agenda_items
+
+
+def _recommended_close_action(checklist: dict[str, dict]) -> dict | None:
+    priority = ["revenue", "payroll", "taxes", "guides", "vacations", "thirteenth", "terminations", "leaves"]
+    for key in priority:
+        item = checklist.get(key)
+        if item and not bool(item.get("ok")):
+            return {
+                "key": key,
+                "title": item.get("title"),
+                "help": item.get("help"),
+                "action_url": item.get("action_url"),
+                "action_label": item.get("action_label"),
+            }
+    return None
+
+
+def _critical_close_pending_items(checklist: dict[str, dict]) -> list[dict]:
+    critical_keys = ["revenue", "payroll", "taxes", "guides"]
+    out: list[dict] = []
+    for key in critical_keys:
+        item = checklist.get(key)
+        if item and not bool(item.get("ok")):
+            out.append(
+                {
+                    "key": key,
+                    "title": item.get("title"),
+                    "help": item.get("help"),
+                    "action_url": item.get("action_url"),
+                    "action_label": item.get("action_label"),
+                }
+            )
+    return out
+
+
 @payroll_bp.get("/close")
 @login_required
 def close_home():
@@ -1623,6 +1796,10 @@ def close_home():
         "fgts": GuideDocument.query.filter_by(year=year, month=month, doc_type="fgts").first(),
     }
     legal_deadlines = _build_legal_deadlines(year=year, month=month, docs=docs)
+    obligations_agenda = _build_obligations_agenda(year=year, month=month, docs=docs)
+    agenda_overdue = [item for item in obligations_agenda if item.get("bucket") == "overdue"]
+    agenda_today = [item for item in obligations_agenda if item.get("bucket") == "today"]
+    agenda_next_7_days = [item for item in obligations_agenda if item.get("bucket") == "next_7_days"]
     compliance_session_key = f"payroll_close_compliance:{year}-{month}"
     compliance_result = session.pop(compliance_session_key, None)
 
@@ -1660,7 +1837,7 @@ def close_home():
             },
         },
         "guides": {
-            "ok": all(bool(docs.get(k)) for k in ("darf", "das", "fgts")),
+            "ok": all(bool(docs.get(k)) and bool(getattr(docs.get(k), "filename", None)) for k in ("darf", "das", "fgts")),
             "title": "Guias anexadas (DARF/DAS/FGTS)",
             "help": "Anexe os PDFs das guias da competência. Isso ajuda a centralizar e conferir antes de pagar.",
             "action_url": url_for("payroll.close_home", year=year, month=month),
@@ -1711,6 +1888,9 @@ def close_home():
         },
     }
 
+    recommended_action = _recommended_close_action(checklist)
+    critical_pending_items = _critical_close_pending_items(checklist)
+
     return render_template(
         "payroll/close_home.html",
         year=year,
@@ -1719,8 +1899,14 @@ def close_home():
         run=run,
         closed=closed,
         checklist=checklist,
+        recommended_action=recommended_action,
+        critical_pending_items=critical_pending_items,
         summary=summary,
         legal_deadlines=legal_deadlines,
+        obligations_agenda=obligations_agenda,
+        agenda_overdue=agenda_overdue,
+        agenda_today=agenda_today,
+        agenda_next_7_days=agenda_next_7_days,
         compliance_result=compliance_result,
         revenue_summary=revenue_summary,
         vacations_summary=vacations_summary,
@@ -1847,6 +2033,57 @@ def close_mark():
     if year < 2000 or month < 1 or month > 12:
         flash("Competência inválida.", "warning")
         return redirect(url_for("payroll.close_home"))
+
+    run = PayrollRun.query.filter_by(year=year, month=month).first()
+    comp = date(int(year), int(month), 1)
+    inss_eff, inss_rows = _latest_inss_brackets(comp)
+    irrf_cfg = _latest_irrf_config(comp)
+    irrf_eff, irrf_rows = _latest_irrf_brackets(comp)
+    docs = {
+        "darf": GuideDocument.query.filter_by(year=year, month=month, doc_type="darf").first(),
+        "das": GuideDocument.query.filter_by(year=year, month=month, doc_type="das").first(),
+        "fgts": GuideDocument.query.filter_by(year=year, month=month, doc_type="fgts").first(),
+    }
+    revenue_summary = _calc_revenue_month_summary(year, month)
+
+    close_checklist = {
+        "revenue": {
+            "ok": bool(revenue_summary.get("count")),
+            "title": "Receitas / notas do mês",
+            "help": "Registre as notas (receitas) da competência.",
+            "action_url": url_for("payroll.revenue_home", year=year, month=month),
+            "action_label": "Registrar receitas",
+        },
+        "payroll": {
+            "ok": bool(run),
+            "title": "Folha do mês",
+            "help": "Crie/abra a folha da competência para gerar holerites.",
+            "action_url": url_for("payroll.payroll_home", year=year, month=month),
+            "action_label": "Abrir folha",
+        },
+        "taxes": {
+            "ok": bool(inss_rows) and bool(irrf_rows) and bool(irrf_cfg),
+            "title": "Tabelas de INSS/IRRF",
+            "help": "Sincronize ou configure as tabelas fiscais vigentes.",
+            "action_url": url_for("payroll.tax_config"),
+            "action_label": "Ver configurações",
+            "meta": {"inss_eff": inss_eff, "irrf_eff": irrf_eff},
+        },
+        "guides": {
+            "ok": all(bool(docs.get(k)) and bool(getattr(docs.get(k), "filename", None)) for k in ("darf", "das", "fgts")),
+            "title": "Guias anexadas (DARF/DAS/FGTS)",
+            "help": "Anexe os PDFs das guias da competência.",
+            "action_url": url_for("payroll.close_home", year=year, month=month),
+            "action_label": "Anexar guias",
+        },
+    }
+
+    critical_pending = _critical_close_pending_items(close_checklist)
+    if critical_pending:
+        flash("Não foi possível fechar: ainda existem pendências críticas na competência.", "warning")
+        for item in critical_pending:
+            flash(f"Pendente: {item['title']} — {item['help']}", "warning")
+        return redirect(url_for("payroll.close_home", year=year, month=month))
 
     row = CompetenceClose.query.filter_by(year=year, month=month).first()
     if not row:

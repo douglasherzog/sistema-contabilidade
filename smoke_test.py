@@ -439,37 +439,39 @@ def main() -> int:
     if "R$ 150.00" not in rev_page:
         raise RuntimeError("Expected revenue amount not found in revenue page")
 
-    print("[8] Upload sample DAS guide PDF")
+    print("[8] Upload sample guides (DAS/DARF/FGTS)")
     sample_pdf = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
-    mp_body, boundary = _multipart(
-        {
-            "year": str(test_year),
-            "month": str(test_month),
-            "doc_type": "das",
-            "amount": "123,45",
-            "due_date": "2026-03-20",
-            "paid_at": "",
-        },
-        {"file": {"filename": "das.pdf", "content_type": "application/pdf", "content": sample_pdf}},
-    )
-    url = f"{BASE}/payroll/close/upload"
-    req = urllib.request.Request(
-        url,
-        data=mp_body,
-        method="POST",
-        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
-    )
-    opener.open(req, timeout=20)
+    for dtype, amount in (("das", "123,45"), ("darf", "98,10"), ("fgts", "77,00")):
+        mp_body, boundary = _multipart(
+            {
+                "year": str(test_year),
+                "month": str(test_month),
+                "doc_type": dtype,
+                "amount": amount,
+                "due_date": "2026-03-20",
+                "paid_at": "",
+            },
+            {"file": {"filename": f"{dtype}.pdf", "content_type": "application/pdf", "content": sample_pdf}},
+        )
+        url = f"{BASE}/payroll/close/upload"
+        req = urllib.request.Request(
+            url,
+            data=mp_body,
+            method="POST",
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+        )
+        opener.open(req, timeout=20)
 
-    print("[9] Validate guide link appears")
+    print("[9] Validate guide links appear")
     close_page = _request(
         opener,
         "GET",
         f"/payroll/close?year={test_year}&month={test_month}",
     ).read().decode("utf-8", errors="replace")
-    expected_guide = f"/media/guides/{test_year}-{test_month:02d}_das.pdf"
-    if expected_guide not in close_page:
-        raise RuntimeError("Expected DAS guide link not found in close page")
+    for dtype in ("das", "darf", "fgts"):
+        expected_guide = f"/media/guides/{test_year}-{test_month:02d}_{dtype}.pdf"
+        if expected_guide not in close_page:
+            raise RuntimeError(f"Expected {dtype.upper()} guide link not found in close page")
 
     if "Receitas / notas do mês" not in close_page:
         raise RuntimeError("Close page did not show revenue checklist item")

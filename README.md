@@ -76,6 +76,16 @@ Na tela `Fechamento` (`/payroll/close`) agora existem dois blocos novos:
   - Vermelho: atrasado
   - Usa vencimento da guia quando informado; caso contrário, usa prazo operacional padrão exibido na tela
 
+- **Fechamento assistido (próxima ação + bloqueio inteligente)**
+  - Card "Próxima ação recomendada" aponta a tarefa mais importante para seguir
+  - Exibe lista de pendências críticas (receitas, folha, tabelas fiscais, guias)
+  - "Marcar como fechada" bloqueia quando houver pendência crítica e explica o motivo
+
+- **Agenda automática de obrigações (proativa)**
+  - Bloco com contadores de: atrasados, vencem hoje e próximos 7 dias
+  - Lista didática de obrigações com "por que importa" e botão de ação
+  - Inclui guias da competência (DAS/FGTS/DARF) e lembrete de compliance-check antes do vencimento
+
 Smoke (padrão já aponta para ambiente de testes):
 
 ```bash

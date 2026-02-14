@@ -65,6 +65,112 @@
 <div class="card mb-3">
   <div class="card-body">
     <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Agenda automática de obrigações</h2>
+      <div class="lav-meta">Lembretes proativos: hoje, próximos 7 dias e atrasados</div>
+    </div>
+    <div class="small lav-subtitle mb-3">
+      O sistema monta esta agenda automaticamente com base na competência e nos vencimentos das guias. Use os botões para resolver cada item no momento certo.
+    </div>
+
+    <div class="row g-3 mb-3">
+      <div class="col-md-4">
+        <div class="card h-100 border-danger">
+          <div class="card-body">
+            <div class="small text-muted">Atrasados</div>
+            <div class="h5 mb-0">{{ agenda_overdue|length }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card h-100 border-warning">
+          <div class="card-body">
+            <div class="small text-muted">Vencem hoje</div>
+            <div class="h5 mb-0">{{ agenda_today|length }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card h-100 border-primary">
+          <div class="card-body">
+            <div class="small text-muted">Próximos 7 dias</div>
+            <div class="h5 mb-0">{{ agenda_next_7_days|length }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row g-3">
+      {% for item in obligations_agenda %}
+      <div class="col-lg-6">
+        <div class="card h-100">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-1">
+              <h3 class="h6 mb-0">{{ item.title }}</h3>
+              {% if item.bucket == 'overdue' %}
+                <span class="badge text-bg-danger">Atrasado</span>
+              {% elif item.bucket == 'today' %}
+                <span class="badge text-bg-warning">Hoje</span>
+              {% elif item.bucket == 'next_7_days' %}
+                <span class="badge text-bg-primary">Próx. 7 dias</span>
+              {% else %}
+                <span class="badge text-bg-success">Planejado</span>
+              {% endif %}
+            </div>
+            <div class="small text-muted">Vencimento: {{ item.due_date|fmt_date }}</div>
+            <div class="small">{{ item.reminder }}</div>
+            <div class="lav-meta mt-1">{{ item.why }}</div>
+            {% if item.resolution_steps %}
+              <div class="small mt-2"><strong>Como resolver agora:</strong></div>
+              <div class="small">
+                {% for step in item.resolution_steps %}
+                  <div>{{ step }}</div>
+                {% endfor %}
+              </div>
+            {% endif %}
+            <a class="btn btn-sm btn-outline-primary mt-2" href="{{ item.action_url }}">{{ item.action_label }}</a>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Próxima ação recomendada</h2>
+      <div class="lav-meta">Assistente de fechamento: o sistema indica o próximo passo com maior impacto</div>
+    </div>
+
+    {% if recommended_action %}
+      <div class="lav-callout is-warning mb-3">
+        <strong>Foco agora:</strong> {{ recommended_action.title }}
+        <div class="small">{{ recommended_action.help }}</div>
+      </div>
+      <a class="btn btn-primary" href="{{ recommended_action.action_url }}">{{ recommended_action.action_label }}</a>
+    {% else %}
+      <div class="lav-callout is-success">
+        <strong>Parabéns:</strong> não há pendências principais no checklist.
+        <div class="small">Se todos os documentos estiverem conferidos, você pode marcar a competência como fechada.</div>
+      </div>
+    {% endif %}
+
+    {% if critical_pending_items %}
+      <hr>
+      <div class="small text-muted mb-1">Pendências críticas para liberar o fechamento:</div>
+      <div class="mb-0 small">
+        {% for item in critical_pending_items %}
+          <div><strong>{{ item.title }}</strong> — {{ item.help }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
       <h2 class="h6 mb-0">Compliance-check (auditoria rápida)</h2>
       <div class="lav-meta">Verifica regras trabalhistas e consistência fiscal antes do fechamento</div>
     </div>
