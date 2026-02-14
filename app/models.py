@@ -137,6 +137,43 @@ class RevenueNote(db.Model):
     __table_args__ = (db.Index("ix_revenue_note_year_month", "year", "month"),)
 
 
+class EmployeeVacation(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employee.id"), nullable=False, index=True)
+
+    # Payment competence (month when this vacation payment should be considered in the closing)
+    year = db.Column(db.Integer, nullable=False, index=True)
+    month = db.Column(db.Integer, nullable=False, index=True)
+
+    start_date = db.Column(db.Date, nullable=False)
+    days = db.Column(db.Integer, nullable=False, default=30)
+    sell_days = db.Column(db.Integer, nullable=False, default=0)
+    pay_date = db.Column(db.Date, nullable=True)
+
+    # Snapshot used for calculation/audit
+    base_salary_at_calc = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+
+    # Calculated totals (gross components)
+    vacation_pay = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    vacation_one_third = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    abono_pay = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    abono_one_third = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    gross_total = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+
+    # Estimated discounts (same principle as holerite estimates)
+    inss_est = db.Column(db.Numeric(12, 2), nullable=True)
+    irrf_est = db.Column(db.Numeric(12, 2), nullable=True)
+    net_est = db.Column(db.Numeric(12, 2), nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship("Employee")
+
+    __table_args__ = (
+        db.Index("ix_employee_vacation_year_month", "year", "month"),
+    )
+
+
 class TaxInssBracket(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     effective_from = db.Column(db.Date, nullable=False, index=True)

@@ -1,0 +1,81 @@
+{% extends 'base.html' %}
+{% block title %}Recibo de férias - {{ employee.full_name }}{% endblock %}
+{% block content %}
+<div class="lav-page-header d-print-none">
+  <div class="lav-section-title">
+    <div>
+      <h1 class="h4 mb-1 lav-page-title">Recibo de férias</h1>
+      <div class="small lav-subtitle">{{ employee.full_name }} · Competência {{ '%02d'|format(v.month) }}/{{ v.year }}</div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary" href="{{ url_for('payroll.employee_vacations', employee_id=employee.id, year=v.year, month=v.month) }}">Voltar</a>
+      <button class="btn btn-primary" type="button" onclick="window.print()">Imprimir</button>
+    </div>
+  </div>
+
+  <div class="lav-callout mt-3">
+    <strong>Didático</strong>
+    <div class="small">Este recibo é um modelo interno para conferência. INSS/IRRF aqui são <strong>estimativas</strong> (se tabelas estiverem cadastradas).</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="lav-panel h-100">
+          <div class="fw-bold mb-2">Dados</div>
+          <div class="lav-kv"><span class="lav-meta">Funcionário</span><strong>{{ employee.full_name }}</strong></div>
+          <div class="lav-kv"><span class="lav-meta">Início do gozo</span><strong>{{ v.start_date|fmt_date }}</strong></div>
+          <div class="lav-kv"><span class="lav-meta">Dias de gozo</span><strong>{{ v.days }}</strong></div>
+          <div class="lav-kv"><span class="lav-meta">Dias vendidos (abono)</span><strong>{{ v.sell_days }}</strong></div>
+          <div class="lav-kv"><span class="lav-meta">Pagamento</span><strong>{{ v.pay_date|fmt_date }}</strong></div>
+        </div>
+      </div>
+
+      <div class="col-lg-6">
+        <div class="lav-panel h-100">
+          <div class="fw-bold mb-2">Cálculo (salário fixo)</div>
+          <div class="small lav-subtitle mb-2">Base do cálculo: salário do mês / 30.</div>
+
+          <div class="lav-kv"><span>Salário usado</span><strong>R$ {{ '%.2f'|format(v.base_salary_at_calc or 0) }}</strong></div>
+          <div class="lav-kv"><span>Férias (gozo)</span><strong>R$ {{ '%.2f'|format(v.vacation_pay or 0) }}</strong></div>
+          <div class="lav-kv"><span>1/3 constitucional</span><strong>R$ {{ '%.2f'|format(v.vacation_one_third or 0) }}</strong></div>
+          <div class="lav-kv"><span>Abono (dias vendidos)</span><strong>R$ {{ '%.2f'|format(v.abono_pay or 0) }}</strong></div>
+          <div class="lav-kv"><span>1/3 do abono</span><strong>R$ {{ '%.2f'|format(v.abono_one_third or 0) }}</strong></div>
+
+          <hr class="my-3">
+
+          <div class="lav-kv"><span class="fw-bold">Total bruto</span><strong>R$ {{ '%.2f'|format(v.gross_total or 0) }}</strong></div>
+
+          <div class="mt-2">
+            <div class="fw-bold mb-1">Descontos (estimativa)</div>
+            {% if has_tables and v.inss_est is not none and v.irrf_est is not none %}
+              <div class="lav-kv"><span>INSS (estimado)</span><strong>R$ {{ '%.2f'|format(v.inss_est or 0) }}</strong></div>
+              <div class="lav-kv"><span>IRRF (estimado)</span><strong>R$ {{ '%.2f'|format(v.irrf_est or 0) }}</strong></div>
+              <div class="lav-kv"><span class="fw-bold">Líquido (estimado)</span><strong>R$ {{ '%.2f'|format(v.net_est or 0) }}</strong></div>
+              <div class="lav-meta mt-2">INSS: {{ inss_eff|fmt_date }} · IRRF: {{ irrf_eff|fmt_date }}</div>
+            {% else %}
+              <div class="text-muted small">Para calcular estimativas de INSS/IRRF, configure as tabelas em <strong>Config INSS/IRRF</strong>.</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="my-4">
+
+    <div class="fw-bold mb-2">Assinaturas</div>
+    <div class="row g-2">
+      <div class="col-12">
+        <div class="border-bottom lav-signature-line"></div>
+        <div class="small text-muted">Assinatura do funcionário</div>
+      </div>
+      <div class="col-12">
+        <div class="border-bottom lav-signature-line"></div>
+        <div class="small text-muted">Assinatura do responsável</div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

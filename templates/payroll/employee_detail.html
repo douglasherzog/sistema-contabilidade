@@ -87,5 +87,17 @@
       </div>
     </div>
   </div>
+
+  <div class="col-12">
+    <div class="card">
+      <div class="card-body">
+        <div class="lav-section-title mb-2">
+          <h2 class="h6 mb-0">Férias</h2>
+          <div class="lav-meta">Agendar / registrar férias (gozo e venda de dias) e imprimir recibo.</div>
+        </div>
+        <a class="btn btn-outline-primary" href="{{ url_for('payroll.employee_vacations', employee_id=e.id) }}">Abrir férias</a>
+      </div>
+    </div>
+  </div>
 </div>
 {% endblock %}

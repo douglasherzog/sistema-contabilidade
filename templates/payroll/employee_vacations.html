@@ -1,0 +1,117 @@
+{% extends 'base.html' %}
+{% block title %}Férias - {{ e.full_name }}{% endblock %}
+{% block content %}
+<div class="lav-page-header">
+  <div class="lav-section-title">
+    <div>
+      <h1 class="h4 mb-1 lav-page-title">Férias — {{ e.full_name }}</h1>
+      <div class="small lav-subtitle">Registre férias (gozo) e venda de dias (abono) para manter histórico e conferir valores do mês.</div>
+    </div>
+    <a class="btn btn-outline-secondary" href="{{ url_for('payroll.employee_detail', employee_id=e.id) }}">Voltar</a>
+  </div>
+  <div class="lav-callout mt-3">
+    <strong>Didático</strong>
+    <div class="small">Este módulo calcula férias para <strong>salário fixo</strong> (sem médias). INSS/IRRF aqui são <strong>estimativas</strong> para conferência.</div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Competência do pagamento</h2>
+      <div class="lav-meta">Em qual mês você quer registrar o pagamento das férias.</div>
+    </div>
+
+    <form method="get" action="{{ url_for('payroll.employee_vacations', employee_id=e.id) }}" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label" for="year">Ano</label>
+        <input class="form-control" id="year" name="year" value="{{ year }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="month">Mês</label>
+        <input class="form-control" id="month" name="month" value="{{ month }}" required>
+      </div>
+      <div class="col-12">
+        <button class="btn btn-outline-secondary" type="submit">Abrir competência</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Agendar / registrar férias</h2>
+      <div class="lav-meta">Gozo pode ser fracionado (ex.: 15/15). Abono = venda de até 10 dias.</div>
+    </div>
+
+    <form method="post" action="{{ url_for('payroll.employee_vacations_add', employee_id=e.id) }}" class="row g-2">
+      <input type="hidden" name="year" value="{{ year }}">
+      <input type="hidden" name="month" value="{{ month }}">
+
+      <div class="col-md-4">
+        <label class="form-label" for="start_date">Início do gozo</label>
+        <input class="form-control js-date" id="start_date" name="start_date" placeholder="dd/mm/aaaa" inputmode="numeric" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="pay_date">Data do pagamento (opcional)</label>
+        <input class="form-control js-date" id="pay_date" name="pay_date" placeholder="dd/mm/aaaa" inputmode="numeric">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="days">Dias de gozo</label>
+        <input class="form-control" id="days" name="days" value="30" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="sell_days">Dias vendidos</label>
+        <input class="form-control" id="sell_days" name="sell_days" value="0" required>
+      </div>
+
+      <div class="col-12">
+        <button class="btn btn-primary" type="submit">Registrar férias</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Histórico</h2>
+      <div class="lav-meta">Lista de férias registradas para este funcionário.</div>
+    </div>
+
+    {% if not rows %}
+      <div class="text-muted small">Nenhuma férias registrada ainda.</div>
+    {% else %}
+      <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Competência</th>
+              <th>Início</th>
+              <th class="text-end">Gozo</th>
+              <th class="text-end">Vendidos</th>
+              <th class="text-end">Total bruto</th>
+              <th class="lav-th-fit"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td class="text-muted">{{ '%02d'|format(r.month) }}/{{ r.year }}</td>
+              <td>{{ r.start_date|fmt_date }}</td>
+              <td class="text-end">{{ r.days }}</td>
+              <td class="text-end">{{ r.sell_days }}</td>
+              <td class="text-end"><strong>R$ {{ '%.2f'|format(r.gross_total or 0) }}</strong></td>
+              <td class="text-end">
+                <a class="btn btn-sm btn-outline-secondary" target="_blank" href="{{ url_for('payroll.vacation_receipt', vac_id=r.id) }}">Recibo</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

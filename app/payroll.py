@@ -13,6 +13,7 @@ from .models import (
     CompetenceClose,
     Employee,
     EmployeeDependent,
+    EmployeeVacation,
     EmployeeSalary,
     GuideDocument,
     RevenueNote,
@@ -86,6 +87,41 @@ def _calc_revenue_month_summary(year: int, month: int) -> dict:
     return {
         "count": len(notes),
         "total": total,
+    }
+
+
+def _calc_vacation_amounts(base_salary: Decimal, days: int, sell_days: int) -> dict:
+    # Fixed-salary version (no averages). Uses 30-day base.
+    d = max(0, int(days or 0))
+    s = max(0, int(sell_days or 0))
+    daily = (base_salary / Decimal("30")) if base_salary > 0 else Decimal("0")
+    vacation_pay = (daily * Decimal(str(d))).quantize(Decimal("0.01"))
+    vacation_one_third = (vacation_pay / Decimal("3")).quantize(Decimal("0.01"))
+    abono_pay = (daily * Decimal(str(s))).quantize(Decimal("0.01"))
+    abono_one_third = (abono_pay / Decimal("3")).quantize(Decimal("0.01"))
+    gross_total = (vacation_pay + vacation_one_third + abono_pay + abono_one_third).quantize(Decimal("0.01"))
+    return {
+        "daily": daily.quantize(Decimal("0.0001")) if daily else Decimal("0"),
+        "vacation_pay": vacation_pay,
+        "vacation_one_third": vacation_one_third,
+        "abono_pay": abono_pay,
+        "abono_one_third": abono_one_third,
+        "gross_total": gross_total,
+    }
+
+
+def _calc_vacations_month_summary(year: int, month: int) -> dict:
+    rows = EmployeeVacation.query.filter_by(year=int(year), month=int(month)).all()
+    total = Decimal("0")
+    for r in rows:
+        try:
+            total += Decimal(str(r.gross_total or 0))
+        except Exception:
+            total += Decimal("0")
+    total = total.quantize(Decimal("0.01"))
+    return {
+        "count": len(rows),
+        "total_gross": total,
     }
 
 
@@ -272,6 +308,116 @@ def employee_detail(employee_id: int):
     deps = EmployeeDependent.query.filter_by(employee_id=e.id).order_by(EmployeeDependent.id.desc()).all()
     salaries = EmployeeSalary.query.filter_by(employee_id=e.id).order_by(EmployeeSalary.effective_from.desc()).all()
     return render_template("payroll/employee_detail.html", e=e, deps=deps, salaries=salaries)
+
+
+@payroll_bp.get("/employees/<int:employee_id>/vacations")
+@login_required
+def employee_vacations(employee_id: int):
+    e = Employee.query.get_or_404(employee_id)
+    now = datetime.now()
+    year = int(request.args.get("year") or now.year)
+    month = int(request.args.get("month") or now.month)
+    rows = EmployeeVacation.query.filter_by(employee_id=e.id).order_by(EmployeeVacation.year.desc(), EmployeeVacation.month.desc(), EmployeeVacation.start_date.desc()).all()
+    return render_template(
+        "payroll/employee_vacations.html",
+        e=e,
+        year=year,
+        month=month,
+        rows=rows,
+    )
+
+
+@payroll_bp.post("/employees/<int:employee_id>/vacations")
+@login_required
+def employee_vacations_add(employee_id: int):
+    e = Employee.query.get_or_404(employee_id)
+    year = int(request.form.get("year") or 0)
+    month = int(request.form.get("month") or 0)
+    start_date = _parse_date(request.form.get("start_date"))
+    pay_date = _parse_date(request.form.get("pay_date"))
+    days = int(request.form.get("days") or 0)
+    sell_days = int(request.form.get("sell_days") or 0)
+
+    if year < 2000 or month < 1 or month > 12:
+        flash("Competência inválida.", "warning")
+        return redirect(url_for("payroll.employee_vacations", employee_id=e.id))
+    if not start_date:
+        flash("Informe a data de início das férias.", "warning")
+        return redirect(url_for("payroll.employee_vacations", employee_id=e.id, year=year, month=month))
+
+    if days <= 0 or days > 30:
+        flash("Dias de gozo inválidos (1 a 30).", "warning")
+        return redirect(url_for("payroll.employee_vacations", employee_id=e.id, year=year, month=month))
+    if sell_days < 0 or sell_days > 10:
+        flash("Dias vendidos inválidos (0 a 10).", "warning")
+        return redirect(url_for("payroll.employee_vacations", employee_id=e.id, year=year, month=month))
+    if days + sell_days > 30:
+        flash("Gozo + venda não pode ultrapassar 30 dias.", "warning")
+        return redirect(url_for("payroll.employee_vacations", employee_id=e.id, year=year, month=month))
+
+    base_salary = _salary_for_employee(e, year, month)
+    amounts = _calc_vacation_amounts(base_salary, days, sell_days)
+
+    # Estimate discounts using the same tax tables (didactic, not official).
+    comp = _competence_start(year, month)
+    deps_count = EmployeeDependent.query.filter_by(employee_id=e.id).count()
+    inss_eff, inss_rows = _latest_inss_brackets(comp)
+    irrf_cfg = _latest_irrf_config(comp)
+    irrf_eff, irrf_rows = _latest_irrf_brackets(comp)
+
+    inss_est = None
+    irrf_est = None
+    net_est = None
+    gross = amounts["gross_total"]
+    if inss_rows:
+        inss_est = _calc_inss_progressive(gross, inss_rows)
+    if irrf_rows and irrf_cfg and inss_est is not None:
+        irrf_est = _calc_irrf(gross - inss_est, irrf_cfg, irrf_rows, deps_count)
+    if inss_est is not None and irrf_est is not None:
+        net_est = (gross - inss_est - irrf_est).quantize(Decimal("0.01"))
+
+    row = EmployeeVacation(
+        employee_id=e.id,
+        year=year,
+        month=month,
+        start_date=start_date,
+        days=days,
+        sell_days=sell_days,
+        pay_date=pay_date,
+        base_salary_at_calc=base_salary,
+        vacation_pay=amounts["vacation_pay"],
+        vacation_one_third=amounts["vacation_one_third"],
+        abono_pay=amounts["abono_pay"],
+        abono_one_third=amounts["abono_one_third"],
+        gross_total=amounts["gross_total"],
+        inss_est=(inss_est if inss_est is not None else None),
+        irrf_est=(irrf_est if irrf_est is not None else None),
+        net_est=(net_est if net_est is not None else None),
+    )
+    db.session.add(row)
+    db.session.commit()
+    flash("Férias registradas.", "success")
+    return redirect(url_for("payroll.employee_vacations", employee_id=e.id, year=year, month=month))
+
+
+@payroll_bp.get("/vacations/<int:vac_id>/receipt")
+@login_required
+def vacation_receipt(vac_id: int):
+    v = EmployeeVacation.query.get_or_404(vac_id)
+
+    comp = _competence_start(int(v.year), int(v.month))
+    inss_eff, inss_rows = _latest_inss_brackets(comp)
+    irrf_cfg = _latest_irrf_config(comp)
+    irrf_eff, irrf_rows = _latest_irrf_brackets(comp)
+
+    return render_template(
+        "payroll/vacation_receipt.html",
+        v=v,
+        employee=v.employee,
+        inss_eff=inss_eff,
+        irrf_eff=irrf_eff,
+        has_tables=bool(inss_rows) and bool(irrf_rows) and bool(irrf_cfg),
+    )
 
 
 @payroll_bp.post("/employees/<int:employee_id>/salary")
@@ -544,6 +690,7 @@ def close_home():
 
     summary = _calc_month_summary(run)
     revenue_summary = _calc_revenue_month_summary(year, month)
+    vacations_summary = _calc_vacations_month_summary(year, month)
 
     checklist = {
         "revenue": {
@@ -578,6 +725,17 @@ def close_home():
             "action_url": url_for("payroll.close_home", year=year, month=month),
             "action_label": "Anexar guias",
         },
+        "vacations": {
+            "ok": True,
+            "title": "Férias no mês",
+            "help": "Se algum funcionário recebeu férias nesta competência, registre aqui para manter o histórico e conferir valores.",
+            "action_url": url_for("payroll.employees"),
+            "action_label": "Ver funcionários",
+            "meta": {
+                "count": int(vacations_summary.get("count") or 0),
+                "total_gross": vacations_summary.get("total_gross"),
+            },
+        },
     }
 
     return render_template(
@@ -590,6 +748,7 @@ def close_home():
         checklist=checklist,
         summary=summary,
         revenue_summary=revenue_summary,
+        vacations_summary=vacations_summary,
     )
 
 
