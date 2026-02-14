@@ -10,7 +10,10 @@
         Assim evitamos “chutes” e mantemos transparência.
       </div>
     </div>
-    <a class="btn btn-outline-secondary" href="{{ url_for('payroll.payroll_home') }}">Voltar</a>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('payroll.help_page', slug='tabelas') }}">Ajuda desta tela</a>
+      <a class="btn btn-outline-secondary" href="{{ url_for('payroll.payroll_home') }}">Voltar</a>
+    </div>
   </div>
 
   <div class="lav-callout is-warning mt-3">

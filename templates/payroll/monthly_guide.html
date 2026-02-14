@@ -1,0 +1,125 @@
+{% extends 'base.html' %}
+{% block title %}Modo Guiado do Mês{% endblock %}
+{% block content %}
+<div class="lav-page-header">
+  <div class="lav-section-title">
+    <div>
+      <h1 class="h4 mb-1 lav-page-title">Modo Guiado do Mês</h1>
+      <div class="small lav-subtitle">Siga esta ordem para fechar a competência com segurança, mesmo sem conhecimento técnico.</div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('payroll.help_page', slug='modo_guiado') }}">Como usar</a>
+      <form method="post" action="{{ url_for('payroll.monthly_guide_reset') }}">
+        <input type="hidden" name="year" value="{{ year }}">
+        <input type="hidden" name="month" value="{{ month }}">
+        <button class="btn btn-outline-secondary btn-sm" type="submit">Resetar marcações manuais</button>
+      </form>
+      <a class="btn btn-outline-secondary" href="{{ url_for('payroll.close_home', year=year, month=month) }}">Ir ao Fechamento</a>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h2 class="h6 mb-0">Progresso da competência</h2>
+      <div class="small text-muted">{{ done_steps }}/{{ total_steps }} etapas · {{ progress_pct }}%</div>
+    </div>
+    <progress class="form-range" value="{{ progress_pct }}" max="100" aria-label="Progresso do modo guiado"></progress>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" action="{{ url_for('payroll.monthly_guide') }}" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label" for="year">Ano</label>
+        <input class="form-control" id="year" name="year" value="{{ year }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="month">Mês</label>
+        <input class="form-control" id="month" name="month" value="{{ month }}" required>
+      </div>
+      <div class="col-12">
+        <button class="btn btn-outline-secondary" type="submit">Abrir competência</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    {% if next_step %}
+      <div class="lav-callout is-warning">
+        <strong>Próximo passo recomendado:</strong> {{ next_step.title }}
+        <div class="small mt-1">{{ next_step.desc }}</div>
+        <a class="btn btn-sm btn-primary mt-2" href="{{ next_step.action_url }}">{{ next_step.action_label }}</a>
+      </div>
+    {% else %}
+      <div class="lav-callout">
+        <strong>Parabéns!</strong>
+        <div class="small">Todos os passos principais desta competência estão concluídos.</div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h2 class="h6 mb-3">Checklist principal (ordem sugerida)</h2>
+    <div class="row g-3">
+      {% for step in steps %}
+      <div class="col-lg-6">
+        <div class="card h-100 {% if step.done %}border-success{% else %}border-warning{% endif %}">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+              <h3 class="h6 mb-0">{{ step.title }}</h3>
+              {% if step.done %}
+                <span class="badge text-bg-success">Concluído</span>
+              {% else %}
+                <span class="badge text-bg-warning">Pendente</span>
+              {% endif %}
+            </div>
+            <div class="small text-muted mb-3">{{ step.desc }}</div>
+            <div class="d-flex flex-wrap gap-2">
+              <a class="btn btn-sm btn-outline-primary" href="{{ step.action_url }}">{{ step.action_label }}</a>
+              {% if not step.done %}
+              <form method="post" action="{{ url_for('payroll.monthly_guide_step_toggle') }}">
+                <input type="hidden" name="year" value="{{ year }}">
+                <input type="hidden" name="month" value="{{ month }}">
+                <input type="hidden" name="step_key" value="{{ step.key }}">
+                <input type="hidden" name="action" value="done">
+                <button class="btn btn-sm btn-success" type="submit">Concluir etapa</button>
+              </form>
+              {% else %}
+              <form method="post" action="{{ url_for('payroll.monthly_guide_step_toggle') }}">
+                <input type="hidden" name="year" value="{{ year }}">
+                <input type="hidden" name="month" value="{{ month }}">
+                <input type="hidden" name="step_key" value="{{ step.key }}">
+                <input type="hidden" name="action" value="undone">
+                <button class="btn btn-sm btn-outline-danger" type="submit">Reabrir etapa</button>
+              </form>
+              {% endif %}
+            </div>
+            {% if step.manual_done and not step.auto_done %}
+              <div class="small text-muted mt-2">Marcado manualmente por você.</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <h2 class="h6 mb-2">Resumo rápido da competência</h2>
+    <div class="small text-muted">Funcionários: {{ employees_count }} (ativos: {{ active_employees_count }})</div>
+    <div class="small text-muted">Receitas registradas: {{ revenue_summary.count or 0 }}</div>
+    <div class="small text-muted">Férias: {{ vacations_summary.count or 0 }} · 13º: {{ thirteenth_summary.count or 0 }}</div>
+    <div class="small text-muted">Rescisões: {{ terminations_summary.count or 0 }} · Afastamentos: {{ leaves_summary.count or 0 }}</div>
+    <div class="small text-muted">Vigência fiscal: INSS {{ inss_eff|fmt_date }} · IRRF {{ irrf_eff|fmt_date }}</div>
+  </div>
+</div>
+{% endblock %}

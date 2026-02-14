@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block title %}Tutorial - {{ item.title }}{% endblock %}
+{% block content %}
+<div class="lav-page-header">
+  <div class="lav-section-title">
+    <div>
+      <h1 class="h4 mb-1 lav-page-title">Tutorial: {{ item.title }}</h1>
+      <div class="small lav-subtitle">{{ item.goal }}</div>
+    </div>
+    <a class="btn btn-outline-secondary" href="{{ url_for('payroll.help_index') }}">Voltar aos tutoriais</a>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="fw-bold mb-1">O que fazer primeiro</div>
+    <div class="small">{{ item.first_step }}</div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="fw-bold mb-2">Campos da tela (explicação simples)</div>
+    {% for f in item.fields %}
+      <div class="mb-2">
+        <div><strong>{{ f.name }}</strong></div>
+        <div class="small text-muted">{{ f.explain }}</div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div class="fw-bold mb-2">Passo a passo recomendado</div>
+    {% for s in item.steps %}
+      <div class="small mb-1">{{ loop.index }}. {{ s }}</div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

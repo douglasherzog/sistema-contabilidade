@@ -6,7 +6,10 @@
     <h1 class="h4 mb-0">Receitas / Notas</h1>
     <div class="text-muted small">Registre suas notas do mês aqui. Isso serve de base para conferência, relatórios e cálculo de Fator R (Simples Nacional).</div>
   </div>
-  <a class="btn btn-outline-secondary" href="{{ url_for('payroll.close_home', year=year, month=month) }}">Voltar ao Fechamento</a>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('payroll.help_page', slug='receitas') }}">Ajuda desta tela</a>
+    <a class="btn btn-outline-secondary" href="{{ url_for('payroll.close_home', year=year, month=month) }}">Voltar ao Fechamento</a>
+  </div>
 </div>
 
 <div class="card mb-3">

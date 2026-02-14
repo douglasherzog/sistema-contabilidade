@@ -4,7 +4,7 @@ import os
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 from flask_login import login_required
 from werkzeug.utils import secure_filename
 
@@ -29,6 +29,379 @@ from .models import (
 
 
 payroll_bp = Blueprint("payroll", __name__, url_prefix="/payroll")
+
+
+TUTORIALS: dict[str, dict] = {
+    "painel": {
+        "title": "Painel do mês (Início)",
+        "goal": "Entender o que fazer primeiro na competência e quais pendências existem.",
+        "first_step": "Confira o card 'Próximo passo sugerido' e clique no botão indicado.",
+        "fields": [
+            {"name": "Ano", "explain": "Competência que você quer revisar (ex.: 2026)."},
+            {"name": "Mês", "explain": "Mês da competência (1 a 12)."},
+        ],
+        "steps": [
+            "Abra a competência correta no topo da tela.",
+            "Siga a ordem sugerida pelo sistema: Receitas -> Folha -> Tabelas -> Fechamento.",
+            "Use os cards de Férias/13º/Rescisões/Afastamentos para registrar eventos do mês.",
+        ],
+    },
+    "modo_guiado": {
+        "title": "Modo Guiado do Mês",
+        "goal": "Executar a competência na ordem correta, sem esquecer etapas.",
+        "first_step": "Abra o mês/ano e siga o 'Próximo passo' indicado pelo sistema.",
+        "fields": [
+            {"name": "Ano e mês", "explain": "Competência que você quer concluir."},
+            {"name": "Checklist por etapa", "explain": "Mostra o que já foi feito e o que está pendente."},
+            {"name": "Próximo passo", "explain": "Botão direto para a próxima tela recomendada."},
+        ],
+        "steps": [
+            "Cadastre/atualize funcionários e dados base.",
+            "Registre receitas do mês.",
+            "Abra e salve a folha mensal.",
+            "Confira tabelas INSS/IRRF.",
+            "Anexe guias (DARF/DAS/FGTS).",
+            "Só então marque competência como fechada.",
+        ],
+    },
+    "funcionarios": {
+        "title": "Funcionários",
+        "goal": "Cadastrar e organizar funcionários que entram na folha.",
+        "first_step": "Cadastre o funcionário antes de tentar lançar folha, férias ou 13º.",
+        "fields": [
+            {"name": "Nome", "explain": "Nome completo do funcionário."},
+            {"name": "CPF", "explain": "Opcional, mas recomendado para conferência."},
+            {"name": "Admissão", "explain": "Data de contratação (dd/mm/aaaa)."},
+        ],
+        "steps": [
+            "Clique em 'Cadastrar funcionário'.",
+            "Abra o funcionário e cadastre salário por vigência.",
+            "Cadastre dependentes para cálculo de IRRF.",
+        ],
+    },
+    "funcionario": {
+        "title": "Detalhe do funcionário",
+        "goal": "Centralizar dados do funcionário e acessar módulos trabalhistas.",
+        "first_step": "Cadastre salário vigente antes de registrar eventos (férias/13º/rescisão).",
+        "fields": [
+            {"name": "Vigência do salário", "explain": "Data a partir da qual o salário base vale."},
+            {"name": "Salário base", "explain": "Valor mensal bruto do funcionário."},
+            {"name": "Dependentes", "explain": "Usado para dedução de IRRF."},
+        ],
+        "steps": [
+            "Atualize salário sempre que houver reajuste.",
+            "Use os botões de Férias, 13º, Rescisão e Afastamentos para registros legais.",
+        ],
+    },
+    "folha_home": {
+        "title": "Folha (abertura da competência)",
+        "goal": "Criar ou abrir a folha mensal.",
+        "first_step": "Selecione ano/mês e clique em 'Abrir folha'.",
+        "fields": [
+            {"name": "Ano e Mês", "explain": "Competência da folha."},
+        ],
+        "steps": [
+            "Se já existir folha, o sistema abre para edição.",
+            "Se não existir, cria automaticamente com funcionários ativos.",
+        ],
+    },
+    "folha_edicao": {
+        "title": "Folha (edição)",
+        "goal": "Lançar horas extras e gerar holerites.",
+        "first_step": "Preencha valor/hora extra e depois horas por funcionário.",
+        "fields": [
+            {"name": "Valor hora extra", "explain": "Valor unitário usado no cálculo das horas extras."},
+            {"name": "Horas extras por funcionário", "explain": "Quantidade no mês (aceita decimal)."},
+        ],
+        "steps": [
+            "Lance as horas extras de cada funcionário.",
+            "Clique em Salvar.",
+            "Abra o Holerite para conferência individual.",
+        ],
+    },
+    "ferias": {
+        "title": "Férias",
+        "goal": "Registrar férias e abono com cálculo didático para conferência.",
+        "first_step": "Abra a competência do pagamento e informe início/gozo corretamente.",
+        "fields": [
+            {"name": "Início do gozo", "explain": "Data que inicia o período de férias."},
+            {"name": "Data do pagamento", "explain": "Opcional, mas importante para compliance."},
+            {"name": "Dias de gozo", "explain": "Quantidade de dias de férias usufruídos."},
+            {"name": "Dias vendidos", "explain": "Abono pecuniário (0 a 10 dias)."},
+        ],
+        "steps": [
+            "Registre férias respeitando limite de 30 dias totais (gozo + venda).",
+            "Abra o recibo e confira valores e estimativas.",
+            "Veja o impacto no Fechamento do mês.",
+        ],
+    },
+    "decimo": {
+        "title": "13º salário",
+        "goal": "Registrar parcelas do 13º conforme CLT.",
+        "first_step": "Defina tipo correto (1ª, 2ª ou integral) e meses trabalhados.",
+        "fields": [
+            {"name": "Ano de referência", "explain": "Ano-base do 13º."},
+            {"name": "Data do pagamento", "explain": "Data efetiva do pagamento."},
+            {"name": "Meses trabalhados", "explain": "Proporcionalidade (1 a 12)."},
+            {"name": "Tipo", "explain": "1ª parcela, 2ª parcela ou integral."},
+        ],
+        "steps": [
+            "1ª parcela preferencialmente em novembro.",
+            "2ª parcela até 20/12 (com descontos).",
+            "Valide avisos CLT no recibo.",
+        ],
+    },
+    "rescisao": {
+        "title": "Rescisão",
+        "goal": "Registrar desligamento com aviso prévio e conferência de multa FGTS.",
+        "first_step": "Escolha o tipo de rescisão correto e informe aviso prévio.",
+        "fields": [
+            {"name": "Data da rescisão", "explain": "Data oficial de desligamento."},
+            {"name": "Tipo", "explain": "Sem justa causa, com justa causa, acordo ou pedido de demissão."},
+            {"name": "Aviso prévio / dias", "explain": "Se foi trabalhado, indenizado ou não aplicável."},
+            {"name": "Saldo FGTS estimado", "explain": "Base para cálculo de multa FGTS."},
+            {"name": "Alíquota multa FGTS", "explain": "40% sem justa causa, 20% acordo, 0% demais casos (regra simplificada)."},
+        ],
+        "steps": [
+            "Preencha os dados e salve a rescisão.",
+            "Abra o recibo e siga o checklist guiado (TRCT, FGTS, etc.).",
+            "Confira alertas no compliance-check.",
+        ],
+    },
+    "afastamentos": {
+        "title": "Afastamentos",
+        "goal": "Registrar atestados/licenças e validar regras básicas.",
+        "first_step": "Informe período completo (início e fim) sem inversão de datas.",
+        "fields": [
+            {"name": "Tipo", "explain": "Médico, maternidade, acidente, não remunerada, outro."},
+            {"name": "Início / Fim", "explain": "Período do afastamento."},
+            {"name": "Pagamento", "explain": "Empresa, INSS ou misto."},
+        ],
+        "steps": [
+            "Registre o afastamento por competência.",
+            "Para afastamento médico >15 dias, prefira INSS/misto quando aplicável.",
+        ],
+    },
+    "receitas": {
+        "title": "Receitas / Notas",
+        "goal": "Registrar faturamento mensal para conferência e fechamento.",
+        "first_step": "Abra a competência e cadastre cada nota/receita do mês.",
+        "fields": [
+            {"name": "Data", "explain": "Data da nota (opcional)."},
+            {"name": "Cliente", "explain": "Nome do cliente (opcional)."},
+            {"name": "Descrição", "explain": "Resumo do serviço."},
+            {"name": "Valor", "explain": "Valor bruto da receita."},
+        ],
+        "steps": [
+            "Registre todas as receitas do mês.",
+            "Confira total no resumo da tela.",
+            "Valide no Fechamento se o item de receitas ficou OK.",
+        ],
+    },
+    "fechamento": {
+        "title": "Fechamento",
+        "goal": "Conferir checklist completo antes de encerrar competência.",
+        "first_step": "Revise os cards pendentes e abra cada ação sugerida.",
+        "fields": [
+            {"name": "Checklist guiado", "explain": "Mostra o que falta por área e direciona para a tela certa."},
+            {"name": "Resumo do mês", "explain": "Conferência final dos totais estimados."},
+        ],
+        "steps": [
+            "Verifique receitas, folha, tabelas, eventos trabalhistas e guias.",
+            "Só depois marque competência como fechada.",
+        ],
+    },
+    "tabelas": {
+        "title": "Config INSS/IRRF",
+        "goal": "Manter tabelas fiscais para cálculos estimados consistentes.",
+        "first_step": "Atualize vigências e faixas do ano corrente antes de fechar competência.",
+        "fields": [
+            {"name": "Vigência", "explain": "Data de início da tabela."},
+            {"name": "Faixa até", "explain": "Limite superior da faixa (vazio = última faixa)."},
+            {"name": "Alíquota", "explain": "Percentual em decimal (ex.: 0,075)."},
+            {"name": "Dedução IRRF", "explain": "Dedução por dependente e parcela a deduzir."},
+        ],
+        "steps": [
+            "Preferencialmente rode sync-taxes/compliance-check por CLI.",
+            "Se necessário, ajuste manualmente e reconfira no holerite/fechamento.",
+        ],
+    },
+}
+
+
+@payroll_bp.get("/help")
+@login_required
+def help_index():
+    return render_template("payroll/help_index.html", tutorials=TUTORIALS)
+
+
+@payroll_bp.get("/help/<slug>")
+@login_required
+def help_page(slug: str):
+    item = TUTORIALS.get(slug)
+    if not item:
+        flash("Tutorial não encontrado.", "warning")
+        return redirect(url_for("payroll.help_index"))
+    return render_template("payroll/help_page.html", slug=slug, item=item)
+
+
+def _guide_step_keys() -> set[str]:
+    return {"employees", "revenue", "payroll", "taxes", "guides", "close"}
+
+
+def _guide_session_key(year: int, month: int) -> str:
+    return f"payroll_guide_done:{int(year)}-{int(month)}"
+
+
+@payroll_bp.post("/guide/step")
+@login_required
+def monthly_guide_step_toggle():
+    year = int(request.form.get("year") or 0)
+    month = int(request.form.get("month") or 0)
+    step_key = (request.form.get("step_key") or "").strip().lower()
+    action = (request.form.get("action") or "").strip().lower()
+
+    if year < 2000 or month < 1 or month > 12 or step_key not in _guide_step_keys() or action not in {"done", "undone"}:
+        flash("Ação do modo guiado inválida.", "warning")
+        return redirect(url_for("payroll.monthly_guide"))
+
+    s_key = _guide_session_key(year, month)
+    done = set(session.get(s_key, []))
+
+    if action == "done":
+        done.add(step_key)
+    elif step_key in done:
+        done.remove(step_key)
+
+    session[s_key] = sorted(done)
+    flash("Progresso do modo guiado atualizado.", "success")
+    return redirect(url_for("payroll.monthly_guide", year=year, month=month))
+
+
+@payroll_bp.post("/guide/reset")
+@login_required
+def monthly_guide_reset():
+    year = int(request.form.get("year") or 0)
+    month = int(request.form.get("month") or 0)
+
+    if year < 2000 or month < 1 or month > 12:
+        flash("Competência inválida.", "warning")
+        return redirect(url_for("payroll.monthly_guide"))
+
+    session.pop(_guide_session_key(year, month), None)
+    flash("Marcação manual do modo guiado foi resetada para esta competência.", "success")
+    return redirect(url_for("payroll.monthly_guide", year=year, month=month))
+
+
+@payroll_bp.get("/guide")
+@login_required
+def monthly_guide():
+    now = datetime.now()
+    year = int(request.args.get("year") or now.year)
+    month = int(request.args.get("month") or now.month)
+
+    run = PayrollRun.query.filter_by(year=year, month=month).first()
+    comp = date(int(year), int(month), 1)
+    inss_eff, inss_rows = _latest_inss_brackets(comp)
+    irrf_cfg = _latest_irrf_config(comp)
+    irrf_eff, irrf_rows = _latest_irrf_brackets(comp)
+    closed = CompetenceClose.query.filter_by(year=year, month=month).first()
+
+    docs = {
+        "darf": GuideDocument.query.filter_by(year=year, month=month, doc_type="darf").first(),
+        "das": GuideDocument.query.filter_by(year=year, month=month, doc_type="das").first(),
+        "fgts": GuideDocument.query.filter_by(year=year, month=month, doc_type="fgts").first(),
+    }
+
+    employees_count = Employee.query.count()
+    active_employees_count = Employee.query.filter_by(active=True).count()
+    revenue_summary = _calc_revenue_month_summary(year, month)
+    vacations_summary = _calc_vacations_month_summary(year, month)
+    thirteenth_summary = _calc_thirteenth_month_summary(year, month)
+    terminations_summary = _calc_terminations_month_summary(year, month)
+    leaves_summary = _calc_leaves_month_summary(year, month)
+
+    steps = [
+        {
+            "key": "employees",
+            "title": "1) Base de funcionários",
+            "auto_done": employees_count > 0 and active_employees_count > 0,
+            "desc": "Tenha pelo menos 1 funcionário ativo com dados cadastrais e salário em dia.",
+            "action_url": url_for("payroll.employees"),
+            "action_label": "Abrir funcionários",
+        },
+        {
+            "key": "revenue",
+            "title": "2) Receitas da competência",
+            "auto_done": bool(revenue_summary.get("count")),
+            "desc": "Registre as notas/receitas do mês para conferência financeira.",
+            "action_url": url_for("payroll.revenue_home", year=year, month=month),
+            "action_label": "Lançar receitas",
+        },
+        {
+            "key": "payroll",
+            "title": "3) Folha mensal",
+            "auto_done": bool(run),
+            "desc": "Crie/abra a folha do mês e salve os lançamentos de horas extras.",
+            "action_url": url_for("payroll.payroll_home", year=year, month=month),
+            "action_label": "Abrir folha",
+        },
+        {
+            "key": "taxes",
+            "title": "4) Tabelas INSS/IRRF",
+            "auto_done": bool(inss_rows) and bool(irrf_rows) and bool(irrf_cfg),
+            "desc": "Confirme as tabelas fiscais vigentes para estimativas coerentes.",
+            "action_url": url_for("payroll.tax_config"),
+            "action_label": "Conferir tabelas",
+        },
+        {
+            "key": "guides",
+            "title": "5) Guias da competência",
+            "auto_done": all(bool(docs.get(k)) for k in ("darf", "das", "fgts")),
+            "desc": "Anexe os PDFs de DARF, DAS e FGTS para centralizar conferência.",
+            "action_url": url_for("payroll.close_home", year=year, month=month),
+            "action_label": "Anexar guias",
+        },
+        {
+            "key": "close",
+            "title": "6) Encerramento do mês",
+            "auto_done": bool(closed),
+            "desc": "Depois de tudo conferido, marque a competência como fechada.",
+            "action_url": url_for("payroll.close_home", year=year, month=month),
+            "action_label": "Ir para fechamento",
+        },
+    ]
+
+    reviewed_steps = set(session.get(_guide_session_key(year, month), []))
+    for s in steps:
+        s["manual_done"] = s["key"] in reviewed_steps
+        s["done"] = bool(s.get("auto_done")) or bool(s.get("manual_done"))
+
+    total_steps = len(steps)
+    done_steps = sum(1 for s in steps if s.get("done"))
+    progress_pct = int((done_steps * 100) / total_steps) if total_steps else 0
+
+    next_step = next((s for s in steps if not s.get("done")), None)
+
+    return render_template(
+        "payroll/monthly_guide.html",
+        year=year,
+        month=month,
+        steps=steps,
+        next_step=next_step,
+        total_steps=total_steps,
+        done_steps=done_steps,
+        progress_pct=progress_pct,
+        employees_count=employees_count,
+        active_employees_count=active_employees_count,
+        revenue_summary=revenue_summary,
+        vacations_summary=vacations_summary,
+        thirteenth_summary=thirteenth_summary,
+        terminations_summary=terminations_summary,
+        leaves_summary=leaves_summary,
+        inss_eff=inss_eff,
+        irrf_eff=irrf_eff,
+    )
 
 
 def _to_decimal(v: str | None, default: Decimal = Decimal("0")) -> Decimal:

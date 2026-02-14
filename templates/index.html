@@ -2,9 +2,15 @@
 {% block title %}Início - Sistema Contabilidade{% endblock %}
 {% block content %}
 <div class="lav-page-header">
-  <div>
-    <h1 class="h4 mb-1 lav-page-title">Painel do mês</h1>
-    <div class="small lav-subtitle">Uma visão rápida do que está pendente para fechar a competência com segurança.</div>
+  <div class="d-flex justify-content-between align-items-start">
+    <div>
+      <h1 class="h4 mb-1 lav-page-title">Painel do mês</h1>
+      <div class="small lav-subtitle">Uma visão rápida do que está pendente para fechar a competência com segurança.</div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-primary btn-sm" href="{{ url_for('payroll.monthly_guide') }}">Abrir Modo Guiado</a>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('payroll.help_page', slug='painel') }}">Ajuda desta tela</a>
+    </div>
   </div>
 </div>
 

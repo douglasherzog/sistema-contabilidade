@@ -7,7 +7,10 @@
       <h1 class="h4 mb-1 lav-page-title">Folha {{ '%02d'|format(run.month) }}/{{ run.year }}</h1>
       <div class="small lav-subtitle">Preencha horas extras (se houver) e salve. Depois, abra o holerite para cada funcionário.</div>
     </div>
-    <a class="btn btn-outline-secondary" href="{{ url_for('payroll.payroll_home', year=run.year, month=run.month) }}">Voltar</a>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('payroll.help_page', slug='folha_edicao') }}">Ajuda desta tela</a>
+      <a class="btn btn-outline-secondary" href="{{ url_for('payroll.payroll_home', year=run.year, month=run.month) }}">Voltar</a>
+    </div>
   </div>
   <div class="lav-callout is-info mt-3">
     <strong>Como preencher</strong>

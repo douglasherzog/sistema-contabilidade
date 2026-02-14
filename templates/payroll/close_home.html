@@ -8,6 +8,8 @@
       <div class="small lav-subtitle">Checklist do mês para você conferir se está tudo pronto antes de pagar as guias e encerrar a competência.</div>
     </div>
     <div class="d-flex gap-2">
+      <a class="btn btn-outline-primary btn-sm" href="{{ url_for('payroll.monthly_guide', year=year, month=month) }}">Modo Guiado</a>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('payroll.help_page', slug='fechamento') }}">Ajuda desta tela</a>
       {% if closed %}
         <form method="post" action="{{ url_for('payroll.close_reopen') }}">
           <input type="hidden" name="year" value="{{ year }}">

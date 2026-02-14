@@ -7,7 +7,10 @@
       <h1 class="h4 mb-1 lav-page-title">Afastamentos — {{ e.full_name }}</h1>
       <div class="small lav-subtitle">Registre atestados e licenças para histórico e checagens de conformidade.</div>
     </div>
-    <a class="btn btn-outline-secondary" href="{{ url_for('payroll.employee_detail', employee_id=e.id) }}">Voltar</a>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('payroll.help_page', slug='afastamentos') }}">Ajuda desta tela</a>
+      <a class="btn btn-outline-secondary" href="{{ url_for('payroll.employee_detail', employee_id=e.id) }}">Voltar</a>
+    </div>
   </div>
 </div>
 
