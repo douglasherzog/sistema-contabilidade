@@ -217,6 +217,60 @@ class EmployeeThirteenth(db.Model):
     )
 
 
+class EmployeeTermination(db.Model):
+    """Rescisões de contrato CLT (resumo didático para conferência)."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employee.id"), nullable=False, index=True)
+
+    # Competência da rescisão
+    year = db.Column(db.Integer, nullable=False, index=True)
+    month = db.Column(db.Integer, nullable=False, index=True)
+
+    termination_date = db.Column(db.Date, nullable=False)
+    termination_type = db.Column(db.String(40), nullable=False, default="without_cause")
+    reason = db.Column(db.String(255), nullable=True)
+
+    # Valores resumidos (MVP didático)
+    gross_total = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+    inss_est = db.Column(db.Numeric(12, 2), nullable=True)
+    irrf_est = db.Column(db.Numeric(12, 2), nullable=True)
+    net_est = db.Column(db.Numeric(12, 2), nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship("Employee")
+
+    __table_args__ = (
+        db.Index("ix_employee_termination_year_month", "year", "month"),
+    )
+
+
+class EmployeeLeave(db.Model):
+    """Afastamentos (atestado/licença) com regras básicas para compliance."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employee.id"), nullable=False, index=True)
+
+    # Competência de início do afastamento
+    year = db.Column(db.Integer, nullable=False, index=True)
+    month = db.Column(db.Integer, nullable=False, index=True)
+
+    leave_type = db.Column(db.String(40), nullable=False, default="medical")
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    reason = db.Column(db.String(255), nullable=True)
+    paid_by = db.Column(db.String(20), nullable=False, default="company")  # company | inss | mixed
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship("Employee")
+
+    __table_args__ = (
+        db.Index("ix_employee_leave_year_month", "year", "month"),
+    )
+
+
 class TaxInssBracket(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     effective_from = db.Column(db.Date, nullable=False, index=True)

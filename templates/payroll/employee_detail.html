@@ -92,19 +92,33 @@
     <div class="card">
       <div class="card-body">
         <div class="row g-3">
-          <div class="col-md-6">
+          <div class="col-md-3">
             <div class="lav-section-title mb-2">
               <h2 class="h6 mb-0">Férias</h2>
               <div class="lav-meta">Agendar / registrar férias (gozo e venda de dias) e imprimir recibo.</div>
             </div>
             <a class="btn btn-outline-primary" href="{{ url_for('payroll.employee_vacations', employee_id=e.id) }}">Abrir férias</a>
           </div>
-          <div class="col-md-6">
+          <div class="col-md-3">
             <div class="lav-section-title mb-2">
               <h2 class="h6 mb-0">13º Salário</h2>
               <div class="lav-meta">Registrar parcelas do 13º (1ª e 2ª) conforme CLT.</div>
             </div>
             <a class="btn btn-outline-primary" href="{{ url_for('payroll.employee_thirteenth', employee_id=e.id) }}">Abrir 13º</a>
+          </div>
+          <div class="col-md-3">
+            <div class="lav-section-title mb-2">
+              <h2 class="h6 mb-0">Rescisão</h2>
+              <div class="lav-meta">Registrar desligamento e gerar recibo de conferência.</div>
+            </div>
+            <a class="btn btn-outline-primary" href="{{ url_for('payroll.employee_terminations', employee_id=e.id) }}">Abrir rescisão</a>
+          </div>
+          <div class="col-md-3">
+            <div class="lav-section-title mb-2">
+              <h2 class="h6 mb-0">Afastamentos</h2>
+              <div class="lav-meta">Registrar atestados e licenças para histórico e compliance.</div>
+            </div>
+            <a class="btn btn-outline-primary" href="{{ url_for('payroll.employee_leaves', employee_id=e.id) }}">Abrir afastamentos</a>
           </div>
         </div>
       </div>

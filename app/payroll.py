@@ -13,7 +13,9 @@ from .models import (
     CompetenceClose,
     Employee,
     EmployeeDependent,
+    EmployeeLeave,
     EmployeeSalary,
+    EmployeeTermination,
     EmployeeThirteenth,
     EmployeeVacation,
     GuideDocument,
@@ -123,6 +125,28 @@ def _calc_vacations_month_summary(year: int, month: int) -> dict:
     return {
         "count": len(rows),
         "total_gross": total,
+    }
+
+
+def _calc_terminations_month_summary(year: int, month: int) -> dict:
+    rows = EmployeeTermination.query.filter_by(year=int(year), month=int(month)).all()
+    total = Decimal("0")
+    for r in rows:
+        try:
+            total += Decimal(str(r.gross_total or 0))
+        except Exception:
+            total += Decimal("0")
+    total = total.quantize(Decimal("0.01"))
+    return {
+        "count": len(rows),
+        "total_gross": total,
+    }
+
+
+def _calc_leaves_month_summary(year: int, month: int) -> dict:
+    rows = EmployeeLeave.query.filter_by(year=int(year), month=int(month)).all()
+    return {
+        "count": len(rows),
     }
 
 
@@ -576,6 +600,139 @@ def thirteenth_receipt(thirteenth_id: int):
     )
 
 
+@payroll_bp.get("/employees/<int:employee_id>/terminations")
+@login_required
+def employee_terminations(employee_id: int):
+    e = Employee.query.get_or_404(employee_id)
+    now = datetime.now()
+    year = int(request.args.get("year") or now.year)
+    month = int(request.args.get("month") or now.month)
+    rows = (
+        EmployeeTermination.query.filter_by(employee_id=e.id)
+        .order_by(EmployeeTermination.termination_date.desc(), EmployeeTermination.id.desc())
+        .all()
+    )
+    return render_template("payroll/employee_terminations.html", e=e, year=year, month=month, rows=rows)
+
+
+@payroll_bp.post("/employees/<int:employee_id>/terminations")
+@login_required
+def employee_terminations_add(employee_id: int):
+    e = Employee.query.get_or_404(employee_id)
+    year = int(request.form.get("year") or 0)
+    month = int(request.form.get("month") or 0)
+    termination_date = _parse_date(request.form.get("termination_date"))
+    termination_type = (request.form.get("termination_type") or "").strip().lower()
+    reason = (request.form.get("reason") or "").strip() or None
+    gross_total = _to_decimal(request.form.get("gross_total"))
+
+    if year < 2000 or month < 1 or month > 12 or not termination_date:
+        flash("Dados da rescisão inválidos.", "warning")
+        return redirect(url_for("payroll.employee_terminations", employee_id=e.id))
+
+    if termination_type not in ("without_cause", "with_cause", "agreement", "resignation"):
+        flash("Tipo de rescisão inválido.", "warning")
+        return redirect(url_for("payroll.employee_terminations", employee_id=e.id, year=year, month=month))
+
+    inss_est = None
+    irrf_est = None
+    net_est = None
+    comp = _competence_start(year, month)
+    deps_count = EmployeeDependent.query.filter_by(employee_id=e.id).count()
+    _inss_eff, inss_rows = _latest_inss_brackets(comp)
+    irrf_cfg = _latest_irrf_config(comp)
+    _irrf_eff, irrf_rows = _latest_irrf_brackets(comp)
+    if gross_total > 0 and inss_rows:
+        inss_est = _calc_inss_progressive(gross_total, inss_rows)
+    if gross_total > 0 and irrf_rows and irrf_cfg and inss_est is not None:
+        irrf_est = _calc_irrf(gross_total - inss_est, irrf_cfg, irrf_rows, deps_count)
+    if inss_est is not None and irrf_est is not None:
+        net_est = (gross_total - inss_est - irrf_est).quantize(Decimal("0.01"))
+
+    row = EmployeeTermination(
+        employee_id=e.id,
+        year=year,
+        month=month,
+        termination_date=termination_date,
+        termination_type=termination_type,
+        reason=reason,
+        gross_total=gross_total,
+        inss_est=inss_est,
+        irrf_est=irrf_est,
+        net_est=net_est,
+    )
+    # Employee is no longer active after termination record
+    e.active = False
+    db.session.add(row)
+    db.session.add(e)
+    db.session.commit()
+    flash("Rescisão registrada e funcionário marcado como inativo.", "success")
+    return redirect(url_for("payroll.employee_terminations", employee_id=e.id, year=year, month=month))
+
+
+@payroll_bp.get("/terminations/<int:termination_id>/receipt")
+@login_required
+def termination_receipt(termination_id: int):
+    t = EmployeeTermination.query.get_or_404(termination_id)
+    return render_template("payroll/termination_receipt.html", t=t, employee=t.employee)
+
+
+@payroll_bp.get("/employees/<int:employee_id>/leaves")
+@login_required
+def employee_leaves(employee_id: int):
+    e = Employee.query.get_or_404(employee_id)
+    now = datetime.now()
+    year = int(request.args.get("year") or now.year)
+    month = int(request.args.get("month") or now.month)
+    rows = (
+        EmployeeLeave.query.filter_by(employee_id=e.id)
+        .order_by(EmployeeLeave.start_date.desc(), EmployeeLeave.id.desc())
+        .all()
+    )
+    return render_template("payroll/employee_leaves.html", e=e, year=year, month=month, rows=rows)
+
+
+@payroll_bp.post("/employees/<int:employee_id>/leaves")
+@login_required
+def employee_leaves_add(employee_id: int):
+    e = Employee.query.get_or_404(employee_id)
+    year = int(request.form.get("year") or 0)
+    month = int(request.form.get("month") or 0)
+    leave_type = (request.form.get("leave_type") or "").strip().lower()
+    start_date = _parse_date(request.form.get("start_date"))
+    end_date = _parse_date(request.form.get("end_date"))
+    paid_by = (request.form.get("paid_by") or "").strip().lower()
+    reason = (request.form.get("reason") or "").strip() or None
+
+    if year < 2000 or month < 1 or month > 12:
+        flash("Competência inválida.", "warning")
+        return redirect(url_for("payroll.employee_leaves", employee_id=e.id))
+    if not start_date or not end_date or end_date < start_date:
+        flash("Período do afastamento inválido.", "warning")
+        return redirect(url_for("payroll.employee_leaves", employee_id=e.id, year=year, month=month))
+    if leave_type not in ("medical", "maternity", "accident", "unpaid", "other"):
+        flash("Tipo de afastamento inválido.", "warning")
+        return redirect(url_for("payroll.employee_leaves", employee_id=e.id, year=year, month=month))
+    if paid_by not in ("company", "inss", "mixed"):
+        flash("Origem de pagamento inválida.", "warning")
+        return redirect(url_for("payroll.employee_leaves", employee_id=e.id, year=year, month=month))
+
+    row = EmployeeLeave(
+        employee_id=e.id,
+        year=year,
+        month=month,
+        leave_type=leave_type,
+        start_date=start_date,
+        end_date=end_date,
+        paid_by=paid_by,
+        reason=reason,
+    )
+    db.session.add(row)
+    db.session.commit()
+    flash("Afastamento registrado.", "success")
+    return redirect(url_for("payroll.employee_leaves", employee_id=e.id, year=year, month=month))
+
+
 @payroll_bp.post("/employees/<int:employee_id>/salary")
 @login_required
 def employee_add_salary(employee_id: int):
@@ -848,6 +1005,8 @@ def close_home():
     revenue_summary = _calc_revenue_month_summary(year, month)
     vacations_summary = _calc_vacations_month_summary(year, month)
     thirteenth_summary = _calc_thirteenth_month_summary(year, month)
+    terminations_summary = _calc_terminations_month_summary(year, month)
+    leaves_summary = _calc_leaves_month_summary(year, month)
 
     checklist = {
         "revenue": {
@@ -904,6 +1063,27 @@ def close_home():
                 "total_gross": thirteenth_summary.get("total_gross"),
             },
         },
+        "terminations": {
+            "ok": True,
+            "title": "Rescisões no mês",
+            "help": "Registre desligamentos para manter histórico trabalhista e controle de custos.",
+            "action_url": url_for("payroll.employees"),
+            "action_label": "Ver funcionários",
+            "meta": {
+                "count": int(terminations_summary.get("count") or 0),
+                "total_gross": terminations_summary.get("total_gross"),
+            },
+        },
+        "leaves": {
+            "ok": True,
+            "title": "Afastamentos no mês",
+            "help": "Registre atestados/licenças para checagem de regras e histórico por funcionário.",
+            "action_url": url_for("payroll.employees"),
+            "action_label": "Ver funcionários",
+            "meta": {
+                "count": int(leaves_summary.get("count") or 0),
+            },
+        },
     }
 
     return render_template(
@@ -918,6 +1098,8 @@ def close_home():
         revenue_summary=revenue_summary,
         vacations_summary=vacations_summary,
         thirteenth_summary=thirteenth_summary,
+        terminations_summary=terminations_summary,
+        leaves_summary=leaves_summary,
     )
 
 

@@ -1,0 +1,99 @@
+{% extends 'base.html' %}
+{% block title %}Rescisões - {{ e.full_name }}{% endblock %}
+{% block content %}
+<div class="lav-page-header">
+  <div class="lav-section-title">
+    <div>
+      <h1 class="h4 mb-1 lav-page-title">Rescisões — {{ e.full_name }}</h1>
+      <div class="small lav-subtitle">Registre desligamentos para manter histórico trabalhista e conferir custos por competência.</div>
+    </div>
+    <a class="btn btn-outline-secondary" href="{{ url_for('payroll.employee_detail', employee_id=e.id) }}">Voltar</a>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label" for="year">Ano</label>
+        <input class="form-control" id="year" name="year" value="{{ year }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="month">Mês</label>
+        <input class="form-control" id="month" name="month" value="{{ month }}" required>
+      </div>
+      <div class="col-12">
+        <button class="btn btn-outline-secondary" type="submit">Abrir competência</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h2 class="h6">Registrar rescisão</h2>
+    <form method="post" action="{{ url_for('payroll.employee_terminations_add', employee_id=e.id) }}" class="row g-2">
+      <input type="hidden" name="year" value="{{ year }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      <div class="col-md-4">
+        <label class="form-label" for="termination_date">Data da rescisão</label>
+        <input class="form-control js-date" id="termination_date" name="termination_date" placeholder="dd/mm/aaaa" inputmode="numeric" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="termination_type">Tipo</label>
+        <select class="form-select" id="termination_type" name="termination_type" required>
+          <option value="without_cause">Sem justa causa</option>
+          <option value="with_cause">Com justa causa</option>
+          <option value="agreement">Acordo</option>
+          <option value="resignation">Pedido de demissão</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="gross_total">Total bruto (R$)</label>
+        <input class="form-control js-money" id="gross_total" name="gross_total" placeholder="Ex.: 3.250,00">
+      </div>
+      <div class="col-12">
+        <label class="form-label" for="reason">Observação (opcional)</label>
+        <input class="form-control" id="reason" name="reason" placeholder="Motivo / observação">
+      </div>
+      <div class="col-12">
+        <button class="btn btn-primary" type="submit">Salvar rescisão</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <h2 class="h6">Histórico</h2>
+    {% if not rows %}
+      <div class="text-muted small">Nenhuma rescisão registrada.</div>
+    {% else %}
+    <div class="table-responsive">
+      <table class="table table-sm table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Data</th>
+            <th>Tipo</th>
+            <th class="text-end">Bruto</th>
+            <th class="lav-th-fit"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>{{ r.termination_date|fmt_date }}</td>
+            <td>{{ r.termination_type }}</td>
+            <td class="text-end">R$ {{ '%.2f'|format(r.gross_total or 0) }}</td>
+            <td class="text-end">
+              <a class="btn btn-sm btn-outline-secondary" target="_blank" href="{{ url_for('payroll.termination_receipt', termination_id=r.id) }}">Recibo</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

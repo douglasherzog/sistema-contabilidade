@@ -7,6 +7,8 @@ from flask_login import login_required, current_user
 from .extensions import db
 from .models import (
     CompetenceClose,
+    EmployeeLeave,
+    EmployeeTermination,
     EmployeeThirteenth,
     EmployeeVacation,
     GuideDocument,
@@ -84,6 +86,15 @@ def index():
     thirteenth_count = len(thirteenth_rows)
     thirteenth_total = sum([Decimal(str(r.gross_amount or 0)) for r in thirteenth_rows], Decimal("0")).quantize(Decimal("0.01"))
 
+    # Terminations summary for the month
+    termination_rows = EmployeeTermination.query.filter_by(year=year, month=month).all()
+    termination_count = len(termination_rows)
+    termination_total = sum([Decimal(str(r.gross_total or 0)) for r in termination_rows], Decimal("0")).quantize(Decimal("0.01"))
+
+    # Leaves summary for the month
+    leave_rows = EmployeeLeave.query.filter_by(year=year, month=month).all()
+    leave_count = len(leave_rows)
+
     closed = CompetenceClose.query.filter_by(year=year, month=month).first()
 
     status = {
@@ -122,6 +133,17 @@ def index():
             "ok": True,  # Always OK since no 13th is valid state
             "count": thirteenth_count,
             "total_gross": thirteenth_total,
+            "action_url": url_for("payroll.employees"),
+        },
+        "terminations": {
+            "ok": True,
+            "count": termination_count,
+            "total_gross": termination_total,
+            "action_url": url_for("payroll.employees"),
+        },
+        "leaves": {
+            "ok": True,
+            "count": leave_count,
             "action_url": url_for("payroll.employees"),
         },
         "close": {

@@ -1,0 +1,104 @@
+{% extends 'base.html' %}
+{% block title %}Afastamentos - {{ e.full_name }}{% endblock %}
+{% block content %}
+<div class="lav-page-header">
+  <div class="lav-section-title">
+    <div>
+      <h1 class="h4 mb-1 lav-page-title">Afastamentos — {{ e.full_name }}</h1>
+      <div class="small lav-subtitle">Registre atestados e licenças para histórico e checagens de conformidade.</div>
+    </div>
+    <a class="btn btn-outline-secondary" href="{{ url_for('payroll.employee_detail', employee_id=e.id) }}">Voltar</a>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="get" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label" for="year">Ano</label>
+        <input class="form-control" id="year" name="year" value="{{ year }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="month">Mês</label>
+        <input class="form-control" id="month" name="month" value="{{ month }}" required>
+      </div>
+      <div class="col-12">
+        <button class="btn btn-outline-secondary" type="submit">Abrir competência</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <h2 class="h6">Registrar afastamento</h2>
+    <form method="post" action="{{ url_for('payroll.employee_leaves_add', employee_id=e.id) }}" class="row g-2">
+      <input type="hidden" name="year" value="{{ year }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      <div class="col-md-3">
+        <label class="form-label" for="leave_type">Tipo</label>
+        <select class="form-select" id="leave_type" name="leave_type" required>
+          <option value="medical">Médico / atestado</option>
+          <option value="maternity">Licença maternidade</option>
+          <option value="accident">Acidente de trabalho</option>
+          <option value="unpaid">Licença não remunerada</option>
+          <option value="other">Outro</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="start_date">Início</label>
+        <input class="form-control js-date" id="start_date" name="start_date" placeholder="dd/mm/aaaa" inputmode="numeric" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="end_date">Fim</label>
+        <input class="form-control js-date" id="end_date" name="end_date" placeholder="dd/mm/aaaa" inputmode="numeric" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="paid_by">Pagamento</label>
+        <select class="form-select" id="paid_by" name="paid_by" required>
+          <option value="company">Empresa</option>
+          <option value="inss">INSS</option>
+          <option value="mixed">Misto</option>
+        </select>
+      </div>
+      <div class="col-12">
+        <label class="form-label" for="reason">Observação (opcional)</label>
+        <input class="form-control" id="reason" name="reason" placeholder="Motivo / CID / observação">
+      </div>
+      <div class="col-12">
+        <button class="btn btn-primary" type="submit">Salvar afastamento</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <h2 class="h6">Histórico</h2>
+    {% if not rows %}
+      <div class="text-muted small">Nenhum afastamento registrado.</div>
+    {% else %}
+    <div class="table-responsive">
+      <table class="table table-sm table-striped align-middle">
+        <thead>
+          <tr>
+            <th>Tipo</th>
+            <th>Período</th>
+            <th>Pagamento</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>{{ r.leave_type }}</td>
+            <td>{{ r.start_date|fmt_date }} a {{ r.end_date|fmt_date }}</td>
+            <td>{{ r.paid_by }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

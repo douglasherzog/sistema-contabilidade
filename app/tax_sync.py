@@ -10,7 +10,15 @@ import pdfplumber
 from flask import Flask
 
 from .extensions import db
-from .models import EmployeeThirteenth, EmployeeVacation, TaxInssBracket, TaxIrrfBracket, TaxIrrfConfig
+from .models import (
+    EmployeeLeave,
+    EmployeeTermination,
+    EmployeeThirteenth,
+    EmployeeVacation,
+    TaxInssBracket,
+    TaxIrrfBracket,
+    TaxIrrfConfig,
+)
 
 
 INSS_URL = "https://www.gov.br/inss/pt-br/direitos-e-deveres/inscricao-e-contribuicao/tabela-de-contribuicao-mensal"
@@ -447,6 +455,28 @@ def register_commands(app: Flask) -> None:
             if v.pay_date and v.start_date and v.pay_date > (v.start_date - timedelta(days=2)):
                 issues.append(
                     f"Férias com pagamento fora do prazo legal (id={v.id}, funcionário={v.employee_id}, início={v.start_date.isoformat()}, pagamento={v.pay_date.isoformat()})."
+                )
+
+        # 4) Rescisões - consistência básica
+        terminations = EmployeeTermination.query.filter_by(year=target_year).all()
+        for t in terminations:
+            if t.employee and t.employee.active:
+                issues.append(
+                    f"Rescisão registrada mas funcionário permanece ativo (termination_id={t.id}, employee_id={t.employee_id})."
+                )
+
+        # 5) Afastamentos - consistência e regra simplificada INSS (>15 dias médicos)
+        leaves = EmployeeLeave.query.filter_by(year=target_year).all()
+        for lv in leaves:
+            if lv.end_date < lv.start_date:
+                issues.append(
+                    f"Afastamento com período inválido (leave_id={lv.id}, início={lv.start_date.isoformat()}, fim={lv.end_date.isoformat()})."
+                )
+                continue
+            duration_days = (lv.end_date - lv.start_date).days + 1
+            if lv.leave_type == "medical" and duration_days > 15 and lv.paid_by == "company":
+                issues.append(
+                    f"Afastamento médico >15 dias sem INSS/misto (leave_id={lv.id}, funcionário={lv.employee_id}, dias={duration_days})."
                 )
 
         click.echo(f"Compliance check - ano {target_year}")

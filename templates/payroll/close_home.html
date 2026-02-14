@@ -96,6 +96,24 @@
               </div>
             {% endif %}
 
+            {% if key == 'thirteenth' and item.meta and item.meta.count > 0 %}
+              <div class="lav-meta mb-3">
+                Registrados: {{ item.meta.count }} · Total bruto: R$ {{ '%.2f'|format(item.meta.total_gross or 0) }}
+              </div>
+            {% endif %}
+
+            {% if key == 'terminations' and item.meta and item.meta.count > 0 %}
+              <div class="lav-meta mb-3">
+                Registradas: {{ item.meta.count }} · Total bruto: R$ {{ '%.2f'|format(item.meta.total_gross or 0) }}
+              </div>
+            {% endif %}
+
+            {% if key == 'leaves' and item.meta and item.meta.count > 0 %}
+              <div class="lav-meta mb-3">
+                Registros: {{ item.meta.count }}
+              </div>
+            {% endif %}
+
             <a class="btn btn-sm btn-outline-primary" href="{{ item.action_url }}">{{ item.action_label }}</a>
           </div>
         </div>
@@ -165,6 +183,26 @@
         <div class="col-md-6">
           <div class="small text-muted">13º no mês</div>
           <div><strong>{{ thirteenth_summary.count }}</strong> registro(s) · Total bruto: <strong>R$ {{ '%.2f'|format(thirteenth_summary.total_gross or 0) }}</strong></div>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if terminations_summary and terminations_summary.count > 0 %}
+      <hr>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="small text-muted">Rescisões no mês</div>
+          <div><strong>{{ terminations_summary.count }}</strong> registro(s) · Total bruto: <strong>R$ {{ '%.2f'|format(terminations_summary.total_gross or 0) }}</strong></div>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if leaves_summary and leaves_summary.count > 0 %}
+      <hr>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="small text-muted">Afastamentos no mês</div>
+          <div><strong>{{ leaves_summary.count }}</strong> registro(s)</div>
         </div>
       </div>
       {% endif %}
