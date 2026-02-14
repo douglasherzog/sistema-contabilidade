@@ -27,7 +27,7 @@
             <th class="text-end">Horas extras</th>
             <th class="text-end">Total horas extras</th>
             <th class="text-end">Total bruto</th>
-            <th class="text-end" style="width:1%"></th>
+            <th class="text-end lav-th-fit"></th>
           </tr>
         </thead>
         <tbody>
@@ -35,7 +35,7 @@
           <tr>
             <td>{{ ln.employee.full_name }}</td>
             <td class="text-end">R$ {{ '%.2f'|format(ln.base_salary or 0) }}</td>
-            <td class="text-end" style="max-width:140px;">
+            <td class="text-end lav-cell-input-narrow">
               <input class="form-control form-control-sm text-end" name="overtime_hours_{{ ln.employee_id }}" value="{{ '%.2f'|format(ln.overtime_hours or 0) }}" aria-label="Horas extras - {{ ln.employee.full_name }}">
               <div class="form-text">Ex.: 10,50</div>
             </td>

@@ -126,7 +126,11 @@
         {% if irrf_configs %}
         <div class="mt-3">
           <div class="small text-muted">Configs IRRF (dedução por dependente) cadastradas:</div>
-          <ul class="small">{%- for c in irrf_configs -%}<li>{{ c.effective_from|fmt_date }} — R$ {{ '%.2f'|format(c.dependent_deduction or 0) }}</li>{%- endfor -%}</ul>
+          <div class="small">
+            {% for c in irrf_configs %}
+              <div>{{ c.effective_from|fmt_date }} — R$ {{ '%.2f'|format(c.dependent_deduction or 0) }}</div>
+            {% endfor %}
+          </div>
         </div>
         {% endif %}
       </div>
