@@ -1,0 +1,25 @@
+{% extends 'base.html' %}
+{% block title %}Cadastro - Sistema Contabilidade{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-5">
+    <div class="card">
+      <div class="card-body">
+        <h1 class="h5 mb-3">Criar conta</h1>
+        <form method="post" action="{{ url_for('auth.register_post') }}">
+          <div class="mb-3">
+            <label class="form-label" for="reg_email">E-mail</label>
+            <input class="form-control" type="email" id="reg_email" name="email" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="reg_password">Senha</label>
+            <input class="form-control" type="password" id="reg_password" name="password" required>
+          </div>
+          <button class="btn btn-primary" type="submit">Cadastrar</button>
+          <a class="btn btn-link" href="{{ url_for('auth.login') }}">Voltar</a>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

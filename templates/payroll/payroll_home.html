@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block title %}Folha - Sistema Contabilidade{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h1 class="h4 mb-0">Folha</h1>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <form method="post" action="{{ url_for('payroll.payroll_create_or_open') }}" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label" for="year">Ano</label>
+        <input class="form-control" id="year" name="year" value="{{ year }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="month">Mês</label>
+        <input class="form-control" id="month" name="month" value="{{ month }}" required>
+      </div>
+      <div class="col-md-6">
+        {% if run %}
+          <div class="text-muted small">Já existe folha para esta competência. Abrirá para edição.</div>
+        {% else %}
+          <div class="text-muted small">Vai criar a folha do mês para funcionários ativos.</div>
+        {% endif %}
+      </div>
+      <div class="col-12">
+        <button class="btn btn-primary" type="submit">Abrir folha</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

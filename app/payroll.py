@@ -1,0 +1,513 @@
+from __future__ import annotations
+
+import os
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+
+from flask import Blueprint, current_app, flash, redirect, render_template, request, url_for
+from flask_login import login_required
+from werkzeug.utils import secure_filename
+
+from .extensions import db
+from .models import (
+    Employee,
+    EmployeeDependent,
+    EmployeeSalary,
+    GuideDocument,
+    PayrollLine,
+    PayrollRun,
+    TaxInssBracket,
+    TaxIrrfBracket,
+    TaxIrrfConfig,
+)
+
+
+payroll_bp = Blueprint("payroll", __name__, url_prefix="/payroll")
+
+
+def _to_decimal(v: str | None, default: Decimal = Decimal("0")) -> Decimal:
+    try:
+        if v is None:
+            return default
+        s = str(v).strip()
+        if not s:
+            return default
+        s = s.replace(".", "").replace(",", ".") if "," in s else s
+        return Decimal(s)
+    except (InvalidOperation, ValueError):
+        return default
+
+
+def _media_guides_dir() -> str:
+    p = os.path.join(current_app.instance_path, "media", "guides")
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
+def _competence_start(year: int, month: int) -> date:
+    return date(int(year), int(month), 1)
+
+
+def _salary_for_employee(employee: Employee, year: int, month: int) -> Decimal:
+    comp = _competence_start(year, month)
+    s = (
+        EmployeeSalary.query.filter(EmployeeSalary.employee_id == employee.id)
+        .filter(EmployeeSalary.effective_from <= comp)
+        .order_by(EmployeeSalary.effective_from.desc())
+        .first()
+    )
+    if not s:
+        return Decimal("0")
+    try:
+        return Decimal(str(s.base_salary))
+    except Exception:
+        return Decimal("0")
+
+
+def _latest_inss_brackets(effective_date: date):
+    eff = (
+        db.session.query(TaxInssBracket.effective_from)
+        .filter(TaxInssBracket.effective_from <= effective_date)
+        .order_by(TaxInssBracket.effective_from.desc())
+        .limit(1)
+        .scalar()
+    )
+    if not eff:
+        return None, []
+    rows = TaxInssBracket.query.filter_by(effective_from=eff).order_by(TaxInssBracket.up_to.asc().nullslast()).all()
+    return eff, rows
+
+
+def _latest_irrf_config(effective_date: date):
+    return (
+        TaxIrrfConfig.query.filter(TaxIrrfConfig.effective_from <= effective_date)
+        .order_by(TaxIrrfConfig.effective_from.desc())
+        .first()
+    )
+
+
+def _latest_irrf_brackets(effective_date: date):
+    eff = (
+        db.session.query(TaxIrrfBracket.effective_from)
+        .filter(TaxIrrfBracket.effective_from <= effective_date)
+        .order_by(TaxIrrfBracket.effective_from.desc())
+        .limit(1)
+        .scalar()
+    )
+    if not eff:
+        return None, []
+    rows = TaxIrrfBracket.query.filter_by(effective_from=eff).order_by(TaxIrrfBracket.up_to.asc().nullslast()).all()
+    return eff, rows
+
+
+def _calc_inss_progressive(base: Decimal, brackets: list[TaxInssBracket]) -> Decimal:
+    if base <= 0:
+        return Decimal("0")
+    remaining = base
+    prev = Decimal("0")
+    total = Decimal("0")
+    for b in brackets:
+        up_to = Decimal(str(b.up_to)) if b.up_to is not None else None
+        rate = Decimal(str(b.rate or 0))
+        if rate <= 0:
+            continue
+        if up_to is None:
+            taxable = max(Decimal("0"), remaining)
+        else:
+            taxable = max(Decimal("0"), min(base, up_to) - prev)
+        if taxable > 0:
+            total += (taxable * rate)
+        if up_to is not None:
+            prev = up_to
+        if base <= prev:
+            break
+    return total.quantize(Decimal("0.01"))
+
+
+def _calc_irrf(base: Decimal, cfg: TaxIrrfConfig | None, brackets: list[TaxIrrfBracket], dependents_count: int) -> Decimal:
+    if base <= 0:
+        return Decimal("0")
+    dep_ded = Decimal(str(getattr(cfg, "dependent_deduction", 0) or 0)) if cfg else Decimal("0")
+    calc_base = base - (dep_ded * Decimal(str(dependents_count or 0)))
+    if calc_base <= 0:
+        return Decimal("0")
+
+    # IRRF (mensal) tipicamente é por faixa com "parcela a deduzir" (não progressivo no cálculo final).
+    chosen = None
+    for b in brackets:
+        up_to = Decimal(str(b.up_to)) if b.up_to is not None else None
+        if up_to is None or calc_base <= up_to:
+            chosen = b
+            break
+    if not chosen:
+        return Decimal("0")
+    rate = Decimal(str(chosen.rate or 0))
+    ded = Decimal(str(chosen.deduction or 0))
+    val = (calc_base * rate) - ded
+    if val < 0:
+        val = Decimal("0")
+    return val.quantize(Decimal("0.01"))
+
+
+@payroll_bp.get("/employees")
+@login_required
+def employees():
+    items = Employee.query.order_by(Employee.active.desc(), Employee.full_name.asc()).all()
+    return render_template("payroll/employees.html", items=items)
+
+
+@payroll_bp.post("/employees")
+@login_required
+def employees_create():
+    full_name = (request.form.get("full_name") or "").strip()
+    cpf = (request.form.get("cpf") or "").strip() or None
+    hired_at_raw = (request.form.get("hired_at") or "").strip()
+    hired_at = None
+    if hired_at_raw:
+        try:
+            hired_at = date.fromisoformat(hired_at_raw)
+        except Exception:
+            hired_at = None
+
+    if not full_name:
+        flash("Informe o nome do funcionário.", "warning")
+        return redirect(url_for("payroll.employees"))
+
+    e = Employee(full_name=full_name, cpf=cpf, hired_at=hired_at)
+    db.session.add(e)
+    db.session.commit()
+    flash("Funcionário cadastrado.", "success")
+    return redirect(url_for("payroll.employee_detail", employee_id=e.id))
+
+
+@payroll_bp.get("/employees/<int:employee_id>")
+@login_required
+def employee_detail(employee_id: int):
+    e = Employee.query.get_or_404(employee_id)
+    deps = EmployeeDependent.query.filter_by(employee_id=e.id).order_by(EmployeeDependent.id.desc()).all()
+    salaries = EmployeeSalary.query.filter_by(employee_id=e.id).order_by(EmployeeSalary.effective_from.desc()).all()
+    return render_template("payroll/employee_detail.html", e=e, deps=deps, salaries=salaries)
+
+
+@payroll_bp.post("/employees/<int:employee_id>/salary")
+@login_required
+def employee_add_salary(employee_id: int):
+    e = Employee.query.get_or_404(employee_id)
+    eff_raw = (request.form.get("effective_from") or "").strip()
+    base_raw = (request.form.get("base_salary") or "").strip()
+
+    try:
+        eff = date.fromisoformat(eff_raw)
+    except Exception:
+        flash("Data de vigência inválida.", "warning")
+        return redirect(url_for("payroll.employee_detail", employee_id=e.id))
+
+    base = _to_decimal(base_raw)
+    if base <= 0:
+        flash("Informe um salário base válido.", "warning")
+        return redirect(url_for("payroll.employee_detail", employee_id=e.id))
+
+    s = EmployeeSalary(employee_id=e.id, effective_from=eff, base_salary=base)
+    db.session.add(s)
+    db.session.commit()
+    flash("Salário registrado.", "success")
+    return redirect(url_for("payroll.employee_detail", employee_id=e.id))
+
+
+@payroll_bp.post("/employees/<int:employee_id>/dependent")
+@login_required
+def employee_add_dependent(employee_id: int):
+    e = Employee.query.get_or_404(employee_id)
+    full_name = (request.form.get("dep_full_name") or "").strip()
+    cpf = (request.form.get("dep_cpf") or "").strip() or None
+    if not full_name:
+        flash("Informe o nome do dependente.", "warning")
+        return redirect(url_for("payroll.employee_detail", employee_id=e.id))
+    d = EmployeeDependent(employee_id=e.id, full_name=full_name, cpf=cpf)
+    db.session.add(d)
+    db.session.commit()
+    flash("Dependente registrado.", "success")
+    return redirect(url_for("payroll.employee_detail", employee_id=e.id))
+
+
+@payroll_bp.get("/")
+@login_required
+def payroll_home():
+    now = datetime.now()
+    year = int(request.args.get("year") or now.year)
+    month = int(request.args.get("month") or now.month)
+
+    run = PayrollRun.query.filter_by(year=year, month=month).first()
+    return render_template("payroll/payroll_home.html", year=year, month=month, run=run)
+
+
+@payroll_bp.post("/")
+@login_required
+def payroll_create_or_open():
+    year = int(request.form.get("year") or 0)
+    month = int(request.form.get("month") or 0)
+    if year < 2000 or month < 1 or month > 12:
+        flash("Competência inválida.", "warning")
+        return redirect(url_for("payroll.payroll_home"))
+
+    run = PayrollRun.query.filter_by(year=year, month=month).first()
+    if not run:
+        run = PayrollRun(year=year, month=month, overtime_hour_rate=Decimal("12.45"))
+        db.session.add(run)
+        db.session.flush()
+
+        employees = Employee.query.filter_by(active=True).order_by(Employee.full_name.asc()).all()
+        for e in employees:
+            base = _salary_for_employee(e, year, month)
+            line = PayrollLine(
+                payroll_run_id=run.id,
+                employee_id=e.id,
+                base_salary=base,
+                overtime_hours=Decimal("0"),
+                overtime_hour_rate=run.overtime_hour_rate,
+                overtime_amount=Decimal("0"),
+                gross_total=base,
+            )
+            db.session.add(line)
+
+        db.session.commit()
+
+    return redirect(url_for("payroll.payroll_edit", run_id=run.id))
+
+
+@payroll_bp.get("/<int:run_id>")
+@login_required
+def payroll_edit(run_id: int):
+    run = PayrollRun.query.get_or_404(run_id)
+    lines = PayrollLine.query.filter_by(payroll_run_id=run.id).order_by(PayrollLine.id.asc()).all()
+    return render_template("payroll/payroll_edit.html", run=run, lines=lines)
+
+
+@payroll_bp.post("/<int:run_id>")
+@login_required
+def payroll_save(run_id: int):
+    run = PayrollRun.query.get_or_404(run_id)
+
+    rate = _to_decimal(request.form.get("overtime_hour_rate"), default=Decimal("12.45"))
+    if rate <= 0:
+        rate = Decimal("12.45")
+    run.overtime_hour_rate = rate
+
+    lines = PayrollLine.query.filter_by(payroll_run_id=run.id).all()
+    for ln in lines:
+        key = f"overtime_hours_{ln.employee_id}"
+        hours = _to_decimal(request.form.get(key), default=Decimal("0"))
+        if hours < 0:
+            hours = Decimal("0")
+        ln.overtime_hours = hours
+        ln.overtime_hour_rate = rate
+        ln.overtime_amount = (hours * rate).quantize(Decimal("0.01"))
+        ln.gross_total = (Decimal(str(ln.base_salary)) + ln.overtime_amount).quantize(Decimal("0.01"))
+        db.session.add(ln)
+
+    db.session.add(run)
+    db.session.commit()
+    flash("Folha salva.", "success")
+    return redirect(url_for("payroll.payroll_edit", run_id=run.id))
+
+
+@payroll_bp.get("/<int:run_id>/holerite/<int:employee_id>")
+@login_required
+def payroll_holerite(run_id: int, employee_id: int):
+    run = PayrollRun.query.get_or_404(run_id)
+    ln = PayrollLine.query.filter_by(payroll_run_id=run.id, employee_id=employee_id).first()
+    if not ln:
+        flash("Funcionário não encontrado nesta folha.", "warning")
+        return redirect(url_for("payroll.payroll_edit", run_id=run.id))
+
+    comp = date(int(run.year), int(run.month), 1)
+    deps_count = EmployeeDependent.query.filter_by(employee_id=employee_id).count()
+    gross = (Decimal(str(ln.gross_total or 0)) if ln.gross_total is not None else Decimal("0"))
+
+    inss_eff, inss_rows = _latest_inss_brackets(comp)
+    irrf_cfg = _latest_irrf_config(comp)
+    irrf_eff, irrf_rows = _latest_irrf_brackets(comp)
+
+    inss_est = None
+    irrf_est = None
+    if inss_rows:
+        inss_est = _calc_inss_progressive(gross, inss_rows)
+    if irrf_rows and irrf_cfg and inss_est is not None:
+        irrf_est = _calc_irrf(gross - inss_est, irrf_cfg, irrf_rows, deps_count)
+
+    return render_template(
+        "payroll/holerite.html",
+        run=run,
+        ln=ln,
+        deps_count=deps_count,
+        inss_eff=inss_eff,
+        irrf_eff=irrf_eff,
+        inss_est=inss_est,
+        irrf_est=irrf_est,
+        irrf_dep_ded=(getattr(irrf_cfg, "dependent_deduction", None) if irrf_cfg else None),
+    )
+
+
+@payroll_bp.get("/config/taxes")
+@login_required
+def tax_config():
+    inss_rows = TaxInssBracket.query.order_by(TaxInssBracket.effective_from.desc(), TaxInssBracket.up_to.asc().nullslast()).all()
+    irrf_rows = TaxIrrfBracket.query.order_by(TaxIrrfBracket.effective_from.desc(), TaxIrrfBracket.up_to.asc().nullslast()).all()
+    irrf_configs = TaxIrrfConfig.query.order_by(TaxIrrfConfig.effective_from.desc()).all()
+    return render_template("payroll/tax_config.html", inss_rows=inss_rows, irrf_rows=irrf_rows, irrf_configs=irrf_configs)
+
+
+@payroll_bp.post("/config/taxes/inss")
+@login_required
+def tax_inss_add():
+    eff_raw = (request.form.get("effective_from") or "").strip()
+    up_to_raw = (request.form.get("up_to") or "").strip()
+    rate_raw = (request.form.get("rate") or "").strip()
+    try:
+        eff = date.fromisoformat(eff_raw)
+    except Exception:
+        flash("Vigência inválida.", "warning")
+        return redirect(url_for("payroll.tax_config"))
+
+    up_to = _to_decimal(up_to_raw) if up_to_raw else None
+    rate = _to_decimal(rate_raw)
+    if rate <= 0:
+        flash("Alíquota inválida. Use formato 0,075 para 7,5%.", "warning")
+        return redirect(url_for("payroll.tax_config"))
+
+    row = TaxInssBracket(effective_from=eff, up_to=up_to, rate=rate)
+    db.session.add(row)
+    db.session.commit()
+    flash("Faixa INSS adicionada.", "success")
+    return redirect(url_for("payroll.tax_config"))
+
+
+@payroll_bp.post("/config/taxes/irrf_config")
+@login_required
+def tax_irrf_config_set():
+    eff_raw = (request.form.get("effective_from") or "").strip()
+    dep_raw = (request.form.get("dependent_deduction") or "").strip()
+    try:
+        eff = date.fromisoformat(eff_raw)
+    except Exception:
+        flash("Vigência inválida.", "warning")
+        return redirect(url_for("payroll.tax_config"))
+
+    dep = _to_decimal(dep_raw)
+    if dep < 0:
+        dep = Decimal("0")
+
+    cfg = TaxIrrfConfig.query.filter_by(effective_from=eff).first()
+    if not cfg:
+        cfg = TaxIrrfConfig(effective_from=eff, dependent_deduction=dep)
+        db.session.add(cfg)
+    else:
+        cfg.dependent_deduction = dep
+    db.session.commit()
+    flash("Config IRRF salva.", "success")
+    return redirect(url_for("payroll.tax_config"))
+
+
+@payroll_bp.post("/config/taxes/irrf")
+@login_required
+def tax_irrf_add():
+    eff_raw = (request.form.get("effective_from") or "").strip()
+    up_to_raw = (request.form.get("up_to") or "").strip()
+    rate_raw = (request.form.get("rate") or "").strip()
+    ded_raw = (request.form.get("deduction") or "").strip()
+    try:
+        eff = date.fromisoformat(eff_raw)
+    except Exception:
+        flash("Vigência inválida.", "warning")
+        return redirect(url_for("payroll.tax_config"))
+
+    up_to = _to_decimal(up_to_raw) if up_to_raw else None
+    rate = _to_decimal(rate_raw)
+    ded = _to_decimal(ded_raw)
+    if rate < 0:
+        flash("Alíquota inválida.", "warning")
+        return redirect(url_for("payroll.tax_config"))
+
+    row = TaxIrrfBracket(effective_from=eff, up_to=up_to, rate=rate, deduction=ded)
+    db.session.add(row)
+    db.session.commit()
+    flash("Faixa IRRF adicionada.", "success")
+    return redirect(url_for("payroll.tax_config"))
+
+
+@payroll_bp.get("/close")
+@login_required
+def close_home():
+    now = datetime.now()
+    year = int(request.args.get("year") or now.year)
+    month = int(request.args.get("month") or now.month)
+
+    docs = {
+        "darf": GuideDocument.query.filter_by(year=year, month=month, doc_type="darf").first(),
+        "das": GuideDocument.query.filter_by(year=year, month=month, doc_type="das").first(),
+        "fgts": GuideDocument.query.filter_by(year=year, month=month, doc_type="fgts").first(),
+    }
+
+    return render_template("payroll/close_home.html", year=year, month=month, docs=docs)
+
+
+@payroll_bp.post("/close/upload")
+@login_required
+def close_upload():
+    year = int(request.form.get("year") or 0)
+    month = int(request.form.get("month") or 0)
+    doc_type = (request.form.get("doc_type") or "").strip().lower()
+
+    if year < 2000 or month < 1 or month > 12:
+        flash("Competência inválida.", "warning")
+        return redirect(url_for("payroll.close_home"))
+
+    if doc_type not in ("darf", "das", "fgts"):
+        flash("Tipo de guia inválido.", "warning")
+        return redirect(url_for("payroll.close_home", year=year, month=month))
+
+    f = request.files.get("file")
+    if not f or not f.filename:
+        flash("Selecione um PDF.", "warning")
+        return redirect(url_for("payroll.close_home", year=year, month=month))
+
+    fname = secure_filename(f.filename)
+    ext = os.path.splitext(fname)[1].lower()
+    if ext != ".pdf":
+        flash("Apenas PDF.", "warning")
+        return redirect(url_for("payroll.close_home", year=year, month=month))
+
+    amount = _to_decimal(request.form.get("amount"))
+    due_date_raw = (request.form.get("due_date") or "").strip()
+    paid_at_raw = (request.form.get("paid_at") or "").strip()
+
+    due_date = None
+    paid_at = None
+    if due_date_raw:
+        try:
+            due_date = date.fromisoformat(due_date_raw)
+        except Exception:
+            due_date = None
+    if paid_at_raw:
+        try:
+            paid_at = date.fromisoformat(paid_at_raw)
+        except Exception:
+            paid_at = None
+
+    target_name = f"{year}-{month:02d}_{doc_type}.pdf"
+    target_path = os.path.join(_media_guides_dir(), target_name)
+    f.save(target_path)
+
+    doc = GuideDocument.query.filter_by(year=year, month=month, doc_type=doc_type).first()
+    if not doc:
+        doc = GuideDocument(year=year, month=month, doc_type=doc_type, filename=target_name)
+        db.session.add(doc)
+
+    doc.filename = target_name
+    doc.amount = amount if amount > 0 else None
+    doc.due_date = due_date
+    doc.paid_at = paid_at
+
+    db.session.commit()
+    flash("Guia anexada.", "success")
+    return redirect(url_for("payroll.close_home", year=year, month=month))

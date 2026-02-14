@@ -1,0 +1,129 @@
+{% extends 'base.html' %}
+{% block title %}Holerite {{ ln.employee.full_name }} - {{ '%02d'|format(run.month) }}/{{ run.year }}{% endblock %}
+{% block content %}
+<div class="d-print-none d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h4 mb-1">Holerite / Recibo de Pagamento</h1>
+    <div class="text-muted small">Competência {{ '%02d'|format(run.month) }}/{{ run.year }}</div>
+  </div>
+  <div class="d-flex gap-2">
+    <a class="btn btn-outline-secondary" href="{{ url_for('payroll.payroll_edit', run_id=run.id) }}">Voltar</a>
+    <button class="btn btn-primary" type="button" onclick="window.print()">Imprimir</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div class="mb-3">
+      <div class="fw-bold">Funcionário</div>
+      <div>{{ ln.employee.full_name }}</div>
+      <div class="text-muted small">Este holerite é um resumo didático do que está registrado na folha do mês. Ele reflete exatamente os valores salvos no sistema para esta competência.</div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-md-6">
+        <div class="border rounded p-3 h-100">
+          <div class="fw-bold mb-2">Proventos (valores que aumentam o pagamento)</div>
+          <div class="d-flex justify-content-between">
+            <span>Salário base</span>
+            <strong>R$ {{ '%.2f'|format(ln.base_salary or 0) }}</strong>
+          </div>
+          <div class="small text-muted mb-2">Salário vigente na competência. Se o salário mudar, registre uma nova vigência no cadastro do funcionário.</div>
+
+          <div class="d-flex justify-content-between">
+            <span>Horas extras</span>
+            <strong>{{ '%.2f'|format(ln.overtime_hours or 0) }} h</strong>
+          </div>
+          <div class="d-flex justify-content-between">
+            <span>Valor/hora extra</span>
+            <strong>R$ {{ '%.2f'|format(ln.overtime_hour_rate or 0) }}</strong>
+          </div>
+          <div class="d-flex justify-content-between mb-2">
+            <span>Total horas extras</span>
+            <strong>R$ {{ '%.2f'|format(ln.overtime_amount or 0) }}</strong>
+          </div>
+          <div class="small text-muted">Cálculo: horas extras × valor/hora extra.</div>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <div class="border rounded p-3 h-100">
+          <div class="fw-bold mb-2">Totais</div>
+          <div class="d-flex justify-content-between">
+            <span>Total bruto</span>
+            <strong>R$ {{ '%.2f'|format(ln.gross_total or 0) }}</strong>
+          </div>
+
+          <hr class="my-3">
+
+          <div class="fw-bold mb-2">Descontos (Estimativa)</div>
+          <div class="small text-muted mb-2">
+            Esta seção é <strong>estimativa</strong> e serve para conferência. O sistema só calcula se você cadastrar as tabelas em
+            <a href="{{ url_for('payroll.tax_config') }}" class="link-secondary">Config INSS/IRRF</a>.
+          </div>
+
+          <div class="small text-muted">Dependentes considerados: <strong>{{ deps_count or 0 }}</strong></div>
+
+          <div class="mt-2">
+            <div class="d-flex justify-content-between">
+              <span>INSS (estimado)</span>
+              {% if inss_est is not none %}
+                <strong>R$ {{ '%.2f'|format(inss_est or 0) }}</strong>
+              {% else %}
+                <span class="text-muted">não configurado</span>
+              {% endif %}
+            </div>
+            {% if inss_est is not none %}
+              <div class="small text-muted">Base: total bruto. Tabela usada (vigência): {{ inss_eff.strftime('%d/%m/%Y') if inss_eff else '-' }}.</div>
+            {% else %}
+              <div class="small text-muted">Para calcular: cadastre as faixas do INSS na tela de configuração.</div>
+            {% endif %}
+          </div>
+
+          <div class="mt-2">
+            <div class="d-flex justify-content-between">
+              <span>IRRF (estimado)</span>
+              {% if irrf_est is not none %}
+                <strong>R$ {{ '%.2f'|format(irrf_est or 0) }}</strong>
+              {% else %}
+                <span class="text-muted">não configurado</span>
+              {% endif %}
+            </div>
+            {% if irrf_est is not none %}
+              <div class="small text-muted">
+                Base: (bruto − INSS). Dedução por dependente: {{ ('R$ %.2f'|format(irrf_dep_ded)) if irrf_dep_ded is not none else '-' }}.
+                Tabela usada (vigência): {{ irrf_eff.strftime('%d/%m/%Y') if irrf_eff else '-' }}.
+              </div>
+            {% else %}
+              <div class="small text-muted">Para calcular: cadastre a config + as faixas do IRRF na tela de configuração.</div>
+            {% endif %}
+          </div>
+
+          <div class="mt-3 small text-muted">
+            Importante: no mundo real, os valores “oficiais” são os das guias/recibos gerados nos portais (eSocial/DCTFWeb/FGTS/DAS).
+            Use o menu <strong>Fechamento</strong> para anexar os PDFs e manter o histórico do mês.
+          </div>
+
+          <div class="fw-bold mb-2">Assinaturas</div>
+          <div class="row g-2">
+            <div class="col-12">
+              <div class="border-bottom" style="height:28px;"></div>
+              <div class="small text-muted">Assinatura do funcionário</div>
+            </div>
+            <div class="col-12">
+              <div class="border-bottom" style="height:28px;"></div>
+              <div class="small text-muted">Assinatura do responsável</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <hr class="my-4">
+
+    <div class="small text-muted">
+      Dica: use este holerite como recibo interno e anexe guias e comprovantes no menu <strong>Fechamento</strong> para manter o histórico mensal organizado.
+    </div>
+  </div>
+</div>
+{% endblock %}

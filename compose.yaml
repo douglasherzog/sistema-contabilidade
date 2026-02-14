@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: contabilidade
+      POSTGRES_USER: contabilidade
+      POSTGRES_PASSWORD: contabilidade
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U contabilidade -d contabilidade"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://contabilidade:contabilidade@db:5432/contabilidade
+      SECRET_KEY: change-me
+    ports:
+      - "8008:8000"
+    volumes:
+      - .:/app
+
+volumes:
+  db_data:

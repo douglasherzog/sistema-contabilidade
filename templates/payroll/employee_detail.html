@@ -1,0 +1,91 @@
+{% extends 'base.html' %}
+{% block title %}{{ e.full_name }} - Funcionário{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+  <div>
+    <h1 class="h4 mb-1">{{ e.full_name }}</h1>
+    <div class="text-muted small">CPF: {{ e.cpf or '-' }} · Admissão: {{ e.hired_at.isoformat() if e.hired_at else '-' }}</div>
+  </div>
+  <a class="btn btn-outline-secondary" href="{{ url_for('payroll.employees') }}">Voltar</a>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6">Salários (por vigência)</h2>
+        <form method="post" action="{{ url_for('payroll.employee_add_salary', employee_id=e.id) }}" class="row g-2 align-items-end mb-3">
+          <div class="col-6">
+            <label class="form-label" for="effective_from">Vigência a partir de</label>
+            <input class="form-control" type="date" id="effective_from" name="effective_from" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label" for="base_salary">Salário base (R$)</label>
+            <input class="form-control" id="base_salary" name="base_salary" required>
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary" type="submit">Adicionar salário</button>
+          </div>
+        </form>
+
+        {% if salaries %}
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle">
+            <thead><tr><th>Vigência</th><th class="text-end">Salário</th></tr></thead>
+            <tbody>
+              {% for s in salaries %}
+              <tr>
+                <td>{{ s.effective_from.strftime('%d/%m/%Y') }}</td>
+                <td class="text-end">R$ {{ '%.2f'|format(s.base_salary or 0) }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+          <div class="text-muted">Nenhum salário registrado.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-6">
+    <div class="card h-100">
+      <div class="card-body">
+        <h2 class="h6">Dependentes</h2>
+        <form method="post" action="{{ url_for('payroll.employee_add_dependent', employee_id=e.id) }}" class="row g-2 align-items-end mb-3">
+          <div class="col-7">
+            <label class="form-label" for="dep_full_name">Nome</label>
+            <input class="form-control" id="dep_full_name" name="dep_full_name" required>
+          </div>
+          <div class="col-5">
+            <label class="form-label" for="dep_cpf">CPF (opcional)</label>
+            <input class="form-control" id="dep_cpf" name="dep_cpf">
+          </div>
+          <div class="col-12">
+            <button class="btn btn-primary" type="submit">Adicionar dependente</button>
+          </div>
+        </form>
+
+        {% if deps %}
+        <div class="table-responsive">
+          <table class="table table-sm table-striped align-middle">
+            <thead><tr><th>Nome</th><th>CPF</th></tr></thead>
+            <tbody>
+              {% for d in deps %}
+              <tr>
+                <td>{{ d.full_name }}</td>
+                <td class="text-muted">{{ d.cpf or '-' }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+          <div class="text-muted">Nenhum dependente registrado.</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
