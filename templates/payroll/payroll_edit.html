@@ -1,21 +1,37 @@
 {% extends 'base.html' %}
 {% block title %}Folha {{ '%02d'|format(run.month) }}/{{ run.year }}{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-start mb-3">
-  <div>
-    <h1 class="h4 mb-1">Folha {{ '%02d'|format(run.month) }}/{{ run.year }}</h1>
-    <div class="text-muted small">Horas extras: lança as horas e o sistema calcula com base no valor/hora.</div>
+<div class="lav-page-header">
+  <div class="lav-section-title">
+    <div>
+      <h1 class="h4 mb-1 lav-page-title">Folha {{ '%02d'|format(run.month) }}/{{ run.year }}</h1>
+      <div class="small lav-subtitle">Preencha horas extras (se houver) e salve. Depois, abra o holerite para cada funcionário.</div>
+    </div>
+    <a class="btn btn-outline-secondary" href="{{ url_for('payroll.payroll_home', year=run.year, month=run.month) }}">Voltar</a>
   </div>
-  <a class="btn btn-outline-secondary" href="{{ url_for('payroll.payroll_home', year=run.year, month=run.month) }}">Voltar</a>
+  <div class="lav-callout is-info mt-3">
+    <strong>Como preencher</strong>
+    <div class="small">1) Informe o <strong>valor/hora extra</strong>. 2) Lance as <strong>horas extras</strong> por funcionário. 3) Clique em <strong>Salvar</strong>.</div>
+  </div>
 </div>
 
 <form method="post" action="{{ url_for('payroll.payroll_save', run_id=run.id) }}" class="card">
   <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Parâmetros do mês</h2>
+      <div class="lav-meta">O sistema usa estes valores para recalcular a folha ao salvar.</div>
+    </div>
+
     <div class="row g-2 align-items-end mb-3">
       <div class="col-md-4">
         <label class="form-label" for="overtime_hour_rate">Valor hora extra (R$)</label>
         <input class="form-control js-money" id="overtime_hour_rate" name="overtime_hour_rate" value="{{ '%.2f'|format(run.overtime_hour_rate or 12.45) }}" required>
       </div>
+    </div>
+
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Lançamentos por funcionário</h2>
+      <div class="lav-meta">O total bruto é calculado automaticamente.</div>
     </div>
 
     <div class="table-responsive">
