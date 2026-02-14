@@ -4,11 +4,50 @@
 <div class="d-flex justify-content-between align-items-start mb-3">
   <div>
     <h1 class="h4 mb-1">{{ e.full_name }}</h1>
-    <div class="text-muted small">CPF: {{ e.cpf or '-' }} · Admissão: {{ e.hired_at|fmt_date }}</div>
+    <div class="text-muted small">CPF: {{ e.cpf or '-' }} · Nascimento: {{ e.birth_date|fmt_date }} · Admissão: {{ e.hired_at|fmt_date }} · Cargo: {{ e.role_title or '-' }}</div>
   </div>
   <div class="d-flex gap-2">
     <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('payroll.help_page', slug='funcionario') }}">Ajuda desta tela</a>
     <a class="btn btn-outline-secondary" href="{{ url_for('payroll.employees') }}">Voltar</a>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Cadastro oficial mínimo (funcionário)</h2>
+      <div class="lav-meta">Campos essenciais para rotina trabalhista: nome, CPF, nascimento, admissão e cargo.</div>
+    </div>
+
+    <form method="post" action="{{ url_for('payroll.employee_update_profile', employee_id=e.id) }}" class="row g-2 align-items-end">
+      <div class="col-md-4">
+        <label class="form-label" for="full_name">Nome completo</label>
+        <input class="form-control" id="full_name" name="full_name" value="{{ e.full_name }}" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="cpf">CPF</label>
+        <input class="form-control" id="cpf" name="cpf" value="{{ e.cpf or '' }}" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="birth_date">Nascimento</label>
+        <input class="form-control js-date" type="text" id="birth_date" name="birth_date" value="{{ e.birth_date|fmt_date }}" placeholder="dd/mm/aaaa" inputmode="numeric" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="hired_at">Admissão</label>
+        <input class="form-control js-date" type="text" id="hired_at" name="hired_at" value="{{ e.hired_at|fmt_date }}" placeholder="dd/mm/aaaa" inputmode="numeric" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="role_title">Cargo/Função</label>
+        <input class="form-control" id="role_title" name="role_title" value="{{ e.role_title or '' }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="pis">PIS (opcional)</label>
+        <input class="form-control" id="pis" name="pis" value="{{ e.pis or '' }}" placeholder="Somente números">
+      </div>
+      <div class="col-md-3">
+        <button class="btn btn-primary" type="submit">Salvar cadastro oficial mínimo</button>
+      </div>
+    </form>
   </div>
 </div>
 

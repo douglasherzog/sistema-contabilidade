@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
-from flask_login import login_required
+from flask_login import current_user, login_required
 from werkzeug.utils import secure_filename
 
 from .extensions import db
@@ -18,6 +18,7 @@ from .models import (
     EmployeeTermination,
     EmployeeThirteenth,
     EmployeeVacation,
+    ComplianceEvidenceEvent,
     GuideDocument,
     RevenueNote,
     PayrollLine,
@@ -71,8 +72,10 @@ TUTORIALS: dict[str, dict] = {
         "first_step": "Cadastre o funcionário antes de tentar lançar folha, férias ou 13º.",
         "fields": [
             {"name": "Nome", "explain": "Nome completo do funcionário."},
-            {"name": "CPF", "explain": "Opcional, mas recomendado para conferência."},
+            {"name": "CPF", "explain": "Obrigatório no cadastro oficial mínimo."},
+            {"name": "Nascimento", "explain": "Data de nascimento (dd/mm/aaaa)."},
             {"name": "Admissão", "explain": "Data de contratação (dd/mm/aaaa)."},
+            {"name": "Cargo/Função", "explain": "Função principal do colaborador."},
         ],
         "steps": [
             "Clique em 'Cadastrar funcionário'.",
@@ -458,10 +461,169 @@ def _parse_date(v: str | None) -> date | None:
         return None
 
 
+def _digits_only(v: str | None) -> str:
+    return "".join(ch for ch in str(v or "") if ch.isdigit())
+
+
+def _is_valid_cpf(v: str | None) -> bool:
+    cpf = _digits_only(v)
+    if len(cpf) != 11:
+        return False
+    if cpf == cpf[0] * 11:
+        return False
+
+    def _digit(base: str, factor: int) -> int:
+        total = 0
+        for n in base:
+            total += int(n) * factor
+            factor -= 1
+        mod = total % 11
+        return 0 if mod < 2 else 11 - mod
+
+    d1 = _digit(cpf[:9], 10)
+    d2 = _digit(cpf[:9] + str(d1), 11)
+    return cpf[-2:] == f"{d1}{d2}"
+
+
+def _is_valid_pis(v: str | None) -> bool:
+    pis = _digits_only(v)
+    if len(pis) != 11:
+        return False
+    if pis == pis[0] * 11:
+        return False
+    weights = [3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+    total = sum(int(pis[i]) * weights[i] for i in range(10))
+    remainder = 11 - (total % 11)
+    check = 0 if remainder in (10, 11) else remainder
+    return check == int(pis[10])
+
+
+def _validate_employee_official_minimum(
+    *,
+    full_name: str,
+    cpf: str | None,
+    birth_date: date | None,
+    hired_at: date | None,
+    role_title: str,
+    pis: str | None,
+    employee_id: int | None = None,
+) -> list[str]:
+    errors: list[str] = []
+    if not full_name:
+        errors.append("Informe o nome completo do funcionário.")
+    if not cpf:
+        errors.append("Informe o CPF (cadastro oficial mínimo).")
+    elif not _is_valid_cpf(cpf):
+        errors.append("CPF inválido. Verifique os 11 dígitos.")
+
+    if not birth_date:
+        errors.append("Informe a data de nascimento (cadastro oficial mínimo).")
+    if not hired_at:
+        errors.append("Informe a data de admissão (cadastro oficial mínimo).")
+    if birth_date and hired_at and hired_at < birth_date:
+        errors.append("Admissão não pode ser anterior à data de nascimento.")
+    if not role_title:
+        errors.append("Informe o cargo/função (cadastro oficial mínimo).")
+
+    normalized_cpf = _digits_only(cpf) if cpf else None
+    if normalized_cpf:
+        q = Employee.query.filter(Employee.cpf == normalized_cpf)
+        if employee_id:
+            q = q.filter(Employee.id != int(employee_id))
+        if q.first() is not None:
+            errors.append("Já existe funcionário com este CPF.")
+
+    normalized_pis = _digits_only(pis) if pis else None
+    if normalized_pis:
+        if not _is_valid_pis(normalized_pis):
+            errors.append("PIS inválido. Verifique os 11 dígitos.")
+        q = Employee.query.filter(Employee.pis == normalized_pis)
+        if employee_id:
+            q = q.filter(Employee.id != int(employee_id))
+        if q.first() is not None:
+            errors.append("Já existe funcionário com este PIS.")
+
+    return errors
+
+
 def _media_guides_dir() -> str:
     p = os.path.join(current_app.instance_path, "media", "guides")
     os.makedirs(p, exist_ok=True)
     return p
+
+
+def _add_evidence_event(
+    *,
+    year: int,
+    month: int,
+    event_type: str,
+    entity_type: str = "competence",
+    entity_key: str | None = None,
+    details: str | None = None,
+) -> None:
+    actor_email = getattr(current_user, "email", None)
+    db.session.add(
+        ComplianceEvidenceEvent(
+            year=int(year),
+            month=int(month),
+            event_type=event_type,
+            entity_type=entity_type,
+            entity_key=entity_key,
+            actor_email=actor_email,
+            details=details,
+        )
+    )
+
+
+def _validate_guide_document(
+    *,
+    doc: GuideDocument,
+    year: int,
+    month: int,
+    doc_type: str,
+) -> dict:
+    warnings: list[str] = []
+    dangers: list[str] = []
+
+    expected_name = f"{int(year)}-{int(month):02d}_{doc_type}.pdf"
+    filename = (getattr(doc, "filename", None) or "").strip()
+    if not filename:
+        dangers.append("PDF não anexado.")
+    elif filename != expected_name:
+        warnings.append("Nome do PDF fora do padrão da competência.")
+
+    amount = Decimal(str(getattr(doc, "amount", 0) or 0))
+    if amount <= 0:
+        warnings.append("Valor da guia não informado.")
+
+    due_date = getattr(doc, "due_date", None)
+    paid_at = getattr(doc, "paid_at", None)
+    if not due_date:
+        warnings.append("Vencimento não informado.")
+    if paid_at and due_date and paid_at > due_date:
+        warnings.append("Pagamento após o vencimento (possível multa/juros).")
+
+    if dangers:
+        status = "danger"
+    elif warnings:
+        status = "warning"
+    elif filename:
+        status = "ok"
+    else:
+        status = "pending"
+
+    summary = "Validação automática básica OK."
+    if dangers:
+        summary = dangers[0]
+    elif warnings:
+        summary = warnings[0]
+
+    return {
+        "status": status,
+        "summary": summary,
+        "warnings": warnings,
+        "dangers": dangers,
+    }
 
 
 def _competence_start(year: int, month: int) -> date:
@@ -705,15 +867,35 @@ def employees():
 @login_required
 def employees_create():
     full_name = (request.form.get("full_name") or "").strip()
-    cpf = (request.form.get("cpf") or "").strip() or None
+    cpf = _digits_only((request.form.get("cpf") or "").strip()) or None
+    birth_date_raw = (request.form.get("birth_date") or "").strip()
+    birth_date = _parse_date(birth_date_raw)
     hired_at_raw = (request.form.get("hired_at") or "").strip()
     hired_at = _parse_date(hired_at_raw)
+    role_title = (request.form.get("role_title") or "").strip()
+    pis = _digits_only((request.form.get("pis") or "").strip()) or None
 
-    if not full_name:
-        flash("Informe o nome do funcionário.", "warning")
+    errors = _validate_employee_official_minimum(
+        full_name=full_name,
+        cpf=cpf,
+        birth_date=birth_date,
+        hired_at=hired_at,
+        role_title=role_title,
+        pis=pis,
+    )
+    if errors:
+        for msg in errors:
+            flash(msg, "warning")
         return redirect(url_for("payroll.employees"))
 
-    e = Employee(full_name=full_name, cpf=cpf, hired_at=hired_at)
+    e = Employee(
+        full_name=full_name,
+        cpf=cpf,
+        birth_date=birth_date,
+        hired_at=hired_at,
+        role_title=role_title,
+        pis=pis,
+    )
     db.session.add(e)
     db.session.commit()
     flash("Funcionário cadastrado.", "success")
@@ -727,6 +909,42 @@ def employee_detail(employee_id: int):
     deps = EmployeeDependent.query.filter_by(employee_id=e.id).order_by(EmployeeDependent.id.desc()).all()
     salaries = EmployeeSalary.query.filter_by(employee_id=e.id).order_by(EmployeeSalary.effective_from.desc()).all()
     return render_template("payroll/employee_detail.html", e=e, deps=deps, salaries=salaries)
+
+
+@payroll_bp.post("/employees/<int:employee_id>/profile")
+@login_required
+def employee_update_profile(employee_id: int):
+    e = Employee.query.get_or_404(employee_id)
+    full_name = (request.form.get("full_name") or "").strip()
+    cpf = _digits_only((request.form.get("cpf") or "").strip()) or None
+    birth_date = _parse_date(request.form.get("birth_date"))
+    hired_at = _parse_date(request.form.get("hired_at"))
+    role_title = (request.form.get("role_title") or "").strip()
+    pis = _digits_only((request.form.get("pis") or "").strip()) or None
+
+    errors = _validate_employee_official_minimum(
+        full_name=full_name,
+        cpf=cpf,
+        birth_date=birth_date,
+        hired_at=hired_at,
+        role_title=role_title,
+        pis=pis,
+        employee_id=e.id,
+    )
+    if errors:
+        for msg in errors:
+            flash(msg, "warning")
+        return redirect(url_for("payroll.employee_detail", employee_id=e.id))
+
+    e.full_name = full_name
+    e.cpf = cpf
+    e.birth_date = birth_date
+    e.hired_at = hired_at
+    e.role_title = role_title
+    e.pis = pis
+    db.session.commit()
+    flash("Perfil do funcionário atualizado.", "success")
+    return redirect(url_for("payroll.employee_detail", employee_id=e.id))
 
 
 @payroll_bp.get("/employees/<int:employee_id>/vacations")
@@ -1603,6 +1821,143 @@ def _build_legal_deadlines(year: int, month: int, docs: dict[str, GuideDocument 
     return out
 
 
+def _pending_center_sla(bucket: str) -> str:
+    if bucket == "blocked":
+        return "Resolver antes de fechar a competencia"
+    if bucket == "overdue":
+        return "SLA estourado - tratar hoje"
+    if bucket == "today":
+        return "SLA hoje (D-0)"
+    if bucket == "next_7_days":
+        return "Planejar e resolver nesta semana"
+    return "Monitorar"
+
+
+def _build_pending_center(checklist: dict[str, dict], obligations_agenda: list[dict]) -> list[dict]:
+    out: list[dict] = []
+
+    for key, item in checklist.items():
+        if bool(item.get("ok")):
+            continue
+        out.append(
+            {
+                "source": "checklist",
+                "key": key,
+                "title": item.get("title") or "Pendencia de checklist",
+                "description": item.get("help") or "",
+                "bucket": "blocked",
+                "sla": _pending_center_sla("blocked"),
+                "action_url": item.get("action_url"),
+                "action_label": item.get("action_label") or "Resolver",
+                "due_date": None,
+                "priority": 0,
+            }
+        )
+
+    for item in obligations_agenda:
+        bucket = item.get("bucket")
+        if bucket not in ("overdue", "today", "next_7_days"):
+            continue
+        priority = {"overdue": 1, "today": 2, "next_7_days": 3}.get(bucket, 4)
+        out.append(
+            {
+                "source": "agenda",
+                "key": item.get("title") or "agenda",
+                "title": item.get("title") or "Obrigacao",
+                "description": item.get("why") or "",
+                "bucket": bucket,
+                "sla": _pending_center_sla(bucket),
+                "action_url": item.get("action_url"),
+                "action_label": item.get("action_label") or "Abrir",
+                "due_date": item.get("due_date"),
+                "priority": priority,
+            }
+        )
+
+    out.sort(key=lambda row: (int(row.get("priority") or 99), row.get("due_date") is None, row.get("due_date") or date.max))
+    return out
+
+
+def _compute_competence_risk(checklist: dict[str, dict], pending_center: list[dict]) -> dict:
+    checklist_blocked = sum(1 for item in checklist.values() if not bool(item.get("ok")))
+    overdue_count = sum(1 for item in pending_center if item.get("bucket") == "overdue")
+    today_count = sum(1 for item in pending_center if item.get("bucket") == "today")
+    next_7_count = sum(1 for item in pending_center if item.get("bucket") == "next_7_days")
+
+    score = min(100, (checklist_blocked * 20) + (overdue_count * 25) + (today_count * 15) + (next_7_count * 7))
+    if score >= 70:
+        level = "red"
+        level_label = "Risco alto"
+    elif score >= 35:
+        level = "yellow"
+        level_label = "Risco moderado"
+    else:
+        level = "green"
+        level_label = "Risco controlado"
+
+    reasons: list[str] = []
+    if checklist_blocked:
+        reasons.append(f"{checklist_blocked} pendencia(s) bloqueadora(s) no checklist")
+    if overdue_count:
+        reasons.append(f"{overdue_count} obrigacao(oes) em atraso")
+    if today_count:
+        reasons.append(f"{today_count} obrigacao(oes) vencendo hoje")
+    if next_7_count:
+        reasons.append(f"{next_7_count} obrigacao(oes) para os proximos 7 dias")
+    if not reasons:
+        reasons.append("Sem pendencias criticas no momento")
+
+    return {
+        "score": int(score),
+        "level": level,
+        "level_label": level_label,
+        "checklist_blocked": checklist_blocked,
+        "overdue_count": overdue_count,
+        "today_count": today_count,
+        "next_7_days_count": next_7_count,
+        "reasons": reasons,
+    }
+
+
+def _official_guides_catalog(year: int, month: int) -> list[dict]:
+    comp_label = f"{int(month):02d}/{int(year)}"
+    return [
+        {
+            "dtype": "darf",
+            "label": "DARF (Receita Federal)",
+            "portal_label": "Portal e-CAC / Receita Federal",
+            "portal_url": "https://www.gov.br/receitafederal/pt-br",
+            "steps": [
+                f"Acesse o portal oficial e abra a competência {comp_label}.",
+                "Emita ou confira a DARF da folha e valide valor/vencimento.",
+                "Anexe o PDF nesta tela e registre data de pagamento.",
+            ],
+        },
+        {
+            "dtype": "das",
+            "label": "DAS (Simples Nacional)",
+            "portal_label": "Portal do Simples Nacional",
+            "portal_url": "https://www.gov.br/receitafederal/pt-br/assuntos/mei-simei/simei-simples-nacional",
+            "steps": [
+                f"Acesse o portal oficial e abra a competência {comp_label}.",
+                "Gere a DAS e confira o vencimento e o valor apurado.",
+                "Anexe o PDF nesta tela e registre data de pagamento.",
+            ],
+        },
+        {
+            "dtype": "fgts",
+            "label": "FGTS Digital (GFD)",
+            "portal_label": "Portal FGTS Digital",
+            "portal_url": "https://www.gov.br/trabalho-e-emprego/pt-br/servicos/empregador/fgts-digital",
+            "steps": [
+                f"Acesse o portal oficial e abra a competência {comp_label}.",
+                "Emita a guia FGTS Digital e confira vencimento e total.",
+                "Anexe o PDF nesta tela e registre data de pagamento.",
+            ],
+        },
+    ]
+
+
 def _reminder_label(days_left: int | None, paid_at: date | None) -> str:
     if paid_at:
         return "Concluido"
@@ -1795,6 +2150,8 @@ def close_home():
         "das": GuideDocument.query.filter_by(year=year, month=month, doc_type="das").first(),
         "fgts": GuideDocument.query.filter_by(year=year, month=month, doc_type="fgts").first(),
     }
+    guides_catalog = _official_guides_catalog(year=year, month=month)
+    guides_catalog_map = {row["dtype"]: row for row in guides_catalog}
     legal_deadlines = _build_legal_deadlines(year=year, month=month, docs=docs)
     obligations_agenda = _build_obligations_agenda(year=year, month=month, docs=docs)
     agenda_overdue = [item for item in obligations_agenda if item.get("bucket") == "overdue"]
@@ -1890,17 +2247,29 @@ def close_home():
 
     recommended_action = _recommended_close_action(checklist)
     critical_pending_items = _critical_close_pending_items(checklist)
+    pending_center = _build_pending_center(checklist=checklist, obligations_agenda=obligations_agenda)
+    competence_risk = _compute_competence_risk(checklist=checklist, pending_center=pending_center)
+    evidence_events = (
+        ComplianceEvidenceEvent.query.filter_by(year=year, month=month)
+        .order_by(ComplianceEvidenceEvent.created_at.desc())
+        .limit(30)
+        .all()
+    )
 
     return render_template(
         "payroll/close_home.html",
         year=year,
         month=month,
         docs=docs,
+        guides_catalog_map=guides_catalog_map,
         run=run,
         closed=closed,
         checklist=checklist,
         recommended_action=recommended_action,
         critical_pending_items=critical_pending_items,
+        pending_center=pending_center,
+        competence_risk=competence_risk,
+        evidence_events=evidence_events,
         summary=summary,
         legal_deadlines=legal_deadlines,
         obligations_agenda=obligations_agenda,
@@ -1951,6 +2320,13 @@ def close_run_compliance():
             "issues_count": payload["issues_count"],
             "ran_at": payload["ran_at"],
         }
+        _add_evidence_event(
+            year=year,
+            month=month,
+            event_type="compliance_check",
+            details=f"ok={payload['ok']} issues={payload['issues_count']} apply_sync={int(apply_sync)}",
+        )
+        db.session.commit()
     except Exception as e:
         flash(f"Falha ao executar compliance-check: {e}", "warning")
         payload = {
@@ -1970,6 +2346,13 @@ def close_run_compliance():
             "issues_count": payload["issues_count"],
             "ran_at": payload["ran_at"],
         }
+        _add_evidence_event(
+            year=year,
+            month=month,
+            event_type="compliance_check_error",
+            details=f"erro={e}",
+        )
+        db.session.commit()
 
     return redirect(url_for("payroll.close_home", year=year, month=month))
 
@@ -2109,7 +2492,13 @@ def close_mark():
     if not row:
         row = CompetenceClose(year=year, month=month)
         db.session.add(row)
-        db.session.commit()
+    _add_evidence_event(
+        year=year,
+        month=month,
+        event_type="competence_marked_closed",
+        details="Competência marcada como fechada",
+    )
+    db.session.commit()
     flash("Competência marcada como FECHADA (com aviso).", "success")
     return redirect(url_for("payroll.close_home", year=year, month=month))
 
@@ -2126,7 +2515,13 @@ def close_reopen():
     row = CompetenceClose.query.filter_by(year=year, month=month).first()
     if row:
         db.session.delete(row)
-        db.session.commit()
+    _add_evidence_event(
+        year=year,
+        month=month,
+        event_type="competence_reopened",
+        details="Competência reaberta",
+    )
+    db.session.commit()
     flash("Competência reaberta.", "success")
     return redirect(url_for("payroll.close_home", year=year, month=month))
 
@@ -2179,7 +2574,25 @@ def close_upload():
     doc.amount = amount if amount > 0 else None
     doc.due_date = due_date
     doc.paid_at = paid_at
+    validation = _validate_guide_document(doc=doc, year=year, month=month, doc_type=doc_type)
+    doc.validation_status = validation["status"]
+    doc.validation_summary = validation["summary"]
+    doc.validation_checked_at = datetime.utcnow()
+
+    _add_evidence_event(
+        year=year,
+        month=month,
+        event_type="guide_updated",
+        entity_type="guide",
+        entity_key=doc_type,
+        details=f"status={validation['status']} summary={validation['summary']}",
+    )
 
     db.session.commit()
-    flash("Guia atualizada.", "success")
+    if validation["status"] == "danger":
+        flash("Guia atualizada com alerta crítico de validação.", "warning")
+    elif validation["status"] == "warning":
+        flash("Guia atualizada com alerta de validação.", "warning")
+    else:
+        flash("Guia atualizada e validada.", "success")
     return redirect(url_for("payroll.close_home", year=year, month=month))

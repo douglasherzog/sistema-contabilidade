@@ -65,6 +65,90 @@
 <div class="card mb-3">
   <div class="card-body">
     <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Score de risco da competência</h2>
+      <div class="lav-meta">0 (baixo) a 100 (alto), com base no checklist e nas pendências com SLA</div>
+    </div>
+    <div class="d-flex justify-content-between align-items-start mb-2">
+      <div>
+        <div class="small text-muted">Nível</div>
+        {% if competence_risk.level == 'red' %}
+          <span class="badge text-bg-danger">{{ competence_risk.level_label }}</span>
+        {% elif competence_risk.level == 'yellow' %}
+          <span class="badge text-bg-warning">{{ competence_risk.level_label }}</span>
+        {% else %}
+          <span class="badge text-bg-success">{{ competence_risk.level_label }}</span>
+        {% endif %}
+      </div>
+      <div class="text-end">
+        <div class="small text-muted">Score</div>
+        <div class="h4 mb-0">{{ competence_risk.score }}</div>
+      </div>
+    </div>
+    <div class="small">
+      {% for reason in competence_risk.reasons %}
+        <div>{{ reason }}</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Centro único de pendências (SLA)</h2>
+      <div class="lav-meta">Prioridade automática para resolver bloqueios, atrasos e vencimentos críticos</div>
+    </div>
+    {% if pending_center %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Faixa</th>
+              <th>SLA</th>
+              <th>Vencimento</th>
+              <th class="lav-th-fit"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in pending_center %}
+            <tr>
+              <td>{{ row.title }}</td>
+              <td>
+                {% if row.bucket == 'blocked' %}
+                  <span class="badge text-bg-dark">Bloqueador</span>
+                {% elif row.bucket == 'overdue' %}
+                  <span class="badge text-bg-danger">Atrasado</span>
+                {% elif row.bucket == 'today' %}
+                  <span class="badge text-bg-warning">Hoje</span>
+                {% else %}
+                  <span class="badge text-bg-primary">Próx. 7 dias</span>
+                {% endif %}
+              </td>
+              <td class="small text-muted">{{ row.sla }}</td>
+              <td class="small text-muted">{{ row.due_date|fmt_date }}</td>
+              <td>
+                {% if row.action_url %}
+                <a class="btn btn-sm btn-outline-primary" href="{{ row.action_url }}">{{ row.action_label }}</a>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="lav-callout is-success mb-0">
+        <strong>Sem pendências críticas no momento.</strong>
+        <div class="small">Continue acompanhando a agenda para manter o fechamento sob controle.</div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
       <h2 class="h6 mb-0">Agenda automática de obrigações</h2>
       <div class="lav-meta">Lembretes proativos: hoje, próximos 7 dias e atrasados</div>
     </div>
@@ -426,11 +510,26 @@
     <div class="row g-3">
   {% for dtype, label in { 'darf': 'DARF (Receita Federal)', 'das': 'DAS (Simples Nacional)', 'fgts': 'FGTS Digital (GFD)' }.items() %}
   {% set doc = docs.get(dtype) %}
+  {% set official = guides_catalog_map.get(dtype) %}
   <div class="col-lg-4">
     <div class="card h-100">
       <div class="card-body">
         <h2 class="h6 mb-1">{{ label }}</h2>
         <div class="small text-muted mb-3">{{ '%02d'|format(month) }}/{{ year }}</div>
+
+        {% if official %}
+          <div class="lav-callout is-info mb-3">
+            <div class="small"><strong>Modo assistido oficial</strong></div>
+            <div class="small">Fonte confiável: {{ official.portal_label }}</div>
+            <a class="btn btn-sm btn-outline-secondary mt-2" target="_blank" rel="noopener" href="{{ official.portal_url }}">Abrir portal oficial</a>
+            <div class="small mt-2">Passo a passo:</div>
+            <div class="small">
+              {% for step in official.steps %}
+                <div>{{ step }}</div>
+              {% endfor %}
+            </div>
+          </div>
+        {% endif %}
 
         {% if doc %}
           <div class="mb-2">
@@ -440,12 +539,29 @@
               <span class="text-muted small">PDF ainda não anexado.</span>
             {% endif %}
           </div>
+          <div class="mb-2">
+            {% if doc.validation_status == 'danger' %}
+              <span class="badge text-bg-danger">Validação: crítico</span>
+            {% elif doc.validation_status == 'warning' %}
+              <span class="badge text-bg-warning">Validação: atenção</span>
+            {% elif doc.validation_status == 'ok' %}
+              <span class="badge text-bg-success">Validação: OK</span>
+            {% else %}
+              <span class="badge text-bg-secondary">Validação: pendente</span>
+            {% endif %}
+          </div>
+          <div class="small text-muted">{{ doc.validation_summary or 'Sem validação automática ainda.' }}</div>
+          <div class="small text-muted">Última checagem: {{ doc.validation_checked_at|fmt_date }}</div>
           <div class="small text-muted">Valor: {{ ('R$ %.2f'|format(doc.amount)) if doc.amount else '-' }}</div>
           <div class="small text-muted">Vencimento: {{ doc.due_date|fmt_date }}</div>
           <div class="small text-muted mb-3">Pago em: {{ doc.paid_at|fmt_date }}</div>
         {% else %}
           <div class="text-muted small mb-3">Nenhuma informação registrada ainda.</div>
         {% endif %}
+
+        <div class="small text-muted mb-3">
+          Observação: por segurança, emissão/consulta oficial depende de autenticação no portal (gov.br/e-CAC/FGTS Digital).
+        </div>
 
         <form method="post" action="{{ url_for('payroll.close_upload') }}" enctype="multipart/form-data">
           <input type="hidden" name="year" value="{{ year }}">
@@ -475,6 +591,43 @@
   </div>
   {% endfor %}
 </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Trilha de evidências (auditoria)</h2>
+      <div class="lav-meta">Quem fez o quê e quando nesta competência</div>
+    </div>
+    {% if evidence_events %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Quando</th>
+              <th>Evento</th>
+              <th>Entidade</th>
+              <th>Usuário</th>
+              <th>Detalhes</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for ev in evidence_events %}
+            <tr>
+              <td class="small text-muted">{{ ev.created_at|fmt_date }}</td>
+              <td><span class="badge text-bg-light border">{{ ev.event_type }}</span></td>
+              <td class="small">{{ ev.entity_type }}{% if ev.entity_key %} / {{ ev.entity_key }}{% endif %}</td>
+              <td class="small text-muted">{{ ev.actor_email or '-' }}</td>
+              <td class="small text-muted">{{ ev.details or '-' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="small text-muted">Sem eventos registrados nesta competência.</div>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

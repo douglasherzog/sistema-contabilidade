@@ -14,12 +14,24 @@
         <input class="form-control" id="full_name" name="full_name" required>
       </div>
       <div class="col-md-3">
-        <label class="form-label" for="cpf">CPF (opcional)</label>
-        <input class="form-control" id="cpf" name="cpf">
+        <label class="form-label" for="cpf">CPF</label>
+        <input class="form-control" id="cpf" name="cpf" placeholder="Somente números" required>
       </div>
       <div class="col-md-3">
-        <label class="form-label" for="hired_at">Admissão (opcional)</label>
-        <input class="form-control js-date" type="text" id="hired_at" name="hired_at" placeholder="dd/mm/aaaa" inputmode="numeric">
+        <label class="form-label" for="birth_date">Nascimento</label>
+        <input class="form-control js-date" type="text" id="birth_date" name="birth_date" placeholder="dd/mm/aaaa" inputmode="numeric" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="hired_at">Admissão</label>
+        <input class="form-control js-date" type="text" id="hired_at" name="hired_at" placeholder="dd/mm/aaaa" inputmode="numeric" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="role_title">Cargo/Função</label>
+        <input class="form-control" id="role_title" name="role_title" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="pis">PIS (opcional)</label>
+        <input class="form-control" id="pis" name="pis" placeholder="Somente números">
       </div>
       <div class="col-12">
         <button class="btn btn-primary" type="submit">Cadastrar funcionário</button>
@@ -37,6 +49,9 @@
             <tr>
               <th>Nome</th>
               <th>CPF</th>
+              <th>Nascimento</th>
+              <th>Admissão</th>
+              <th>Cargo</th>
               <th>Status</th>
               <th class="lav-th-fit"></th>
             </tr>
@@ -46,6 +61,9 @@
             <tr>
               <td>{{ e.full_name }}</td>
               <td class="text-muted">{{ e.cpf or '-' }}</td>
+              <td class="text-muted">{{ e.birth_date|fmt_date }}</td>
+              <td class="text-muted">{{ e.hired_at|fmt_date }}</td>
+              <td class="text-muted">{{ e.role_title or '-' }}</td>
               <td>
                 {% if e.active %}
                   <span class="badge text-bg-success">Ativo</span>

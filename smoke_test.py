@@ -88,6 +88,24 @@ def _run_cmd(cmd: list[str]) -> str:
     return out
 
 
+def _gen_valid_cpf() -> str:
+    base = [random.randint(0, 9) for _ in range(9)]
+    if len(set(base)) == 1:
+        base[0] = (base[0] + 1) % 10
+
+    def _digit(nums: list[int], factor: int) -> int:
+        total = 0
+        for n in nums:
+            total += n * factor
+            factor -= 1
+        mod = total % 11
+        return 0 if mod < 2 else 11 - mod
+
+    d1 = _digit(base, 10)
+    d2 = _digit(base + [d1], 11)
+    return "".join(str(n) for n in (base + [d1, d2]))
+
+
 def main() -> int:
     jar = CookieJar()
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
@@ -112,6 +130,14 @@ def main() -> int:
         raise RuntimeError("Home page missing proactive action card")
     if "Resumo semanal automático" not in home_page:
         raise RuntimeError("Home page missing weekly automatic summary card")
+    if "Score de risco da competência" not in home_page:
+        raise RuntimeError("Home page missing competence risk score panel")
+    if "Centro único de pendências (SLA)" not in home_page:
+        raise RuntimeError("Home page missing pending center SLA panel")
+    if "Resumo executivo semanal" not in home_page:
+        raise RuntimeError("Home page missing executive weekly summary panel")
+    if "Monitor de mudanças legais/fiscais" not in home_page:
+        raise RuntimeError("Home page missing legal/fiscal monitor panel")
 
     # Optional: validate tax sync routine (requires docker + network)
     if os.environ.get("SMOKE_SKIP_DOCKER_SYNC") not in ("1", "true", "yes"):
@@ -149,14 +175,43 @@ def main() -> int:
             raise RuntimeError("sync-taxes --apply did not confirm DB write")
 
     print("[3] Create employees")
-    r1 = _request(opener_noredir, "POST", "/payroll/employees", {"full_name": "Deise", "cpf": "", "hired_at": ""})
+    cpf1 = _gen_valid_cpf()
+    cpf2 = _gen_valid_cpf()
+    while cpf2 == cpf1:
+        cpf2 = _gen_valid_cpf()
+
+    r1 = _request(
+        opener_noredir,
+        "POST",
+        "/payroll/employees",
+        {
+            "full_name": "Deise",
+            "cpf": cpf1,
+            "birth_date": "1995-07-12",
+            "hired_at": "2026-01-01",
+            "role_title": "Atendente",
+            "pis": "",
+        },
+    )
     loc1 = r1.headers.get("Location") or ""
     m1 = re.search(r"/payroll/employees/(\d+)", loc1)
     if not m1:
         raise RuntimeError(f"Could not parse Deise employee id from redirect: {loc1}")
     deise_id = int(m1.group(1))
 
-    r2 = _request(opener_noredir, "POST", "/payroll/employees", {"full_name": "Juvenaldo", "cpf": "", "hired_at": ""})
+    r2 = _request(
+        opener_noredir,
+        "POST",
+        "/payroll/employees",
+        {
+            "full_name": "Juvenaldo",
+            "cpf": cpf2,
+            "birth_date": "1991-03-25",
+            "hired_at": "2026-01-01",
+            "role_title": "Auxiliar",
+            "pis": "",
+        },
+    )
     loc2 = r2.headers.get("Location") or ""
     m2 = re.search(r"/payroll/employees/(\d+)", loc2)
     if not m2:
@@ -497,6 +552,14 @@ def main() -> int:
         raise RuntimeError("Close page missing automatic obligations agenda block")
     if "Como resolver agora:" not in close_page:
         raise RuntimeError("Close page missing guided resolution steps for critical agenda items")
+    if "Score de risco da competência" not in close_page:
+        raise RuntimeError("Close page missing competence risk score panel")
+    if "Centro único de pendências (SLA)" not in close_page:
+        raise RuntimeError("Close page missing pending center SLA panel")
+    if "Validação:" not in close_page:
+        raise RuntimeError("Close page missing guide validation traffic-light status")
+    if "Trilha de evidências (auditoria)" not in close_page:
+        raise RuntimeError("Close page missing compliance evidence timeline panel")
 
     print("[10] Mark competence as closed (warn-only)")
     _request(opener, "POST", "/payroll/close/mark", {"year": str(test_year), "month": str(test_month)})

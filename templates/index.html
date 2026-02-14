@@ -55,6 +55,84 @@
 <div class="card mb-3">
   <div class="card-body">
     <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Score de risco da competência</h2>
+      <div class="lav-meta">0 (baixo) a 100 (alto), com base em bloqueios e prazos críticos</div>
+    </div>
+    <div class="d-flex justify-content-between align-items-start">
+      <div>
+        <div class="small text-muted">Nível</div>
+        {% if competence_risk.level == 'red' %}
+          <span class="badge text-bg-danger">{{ competence_risk.level_label }}</span>
+        {% elif competence_risk.level == 'yellow' %}
+          <span class="badge text-bg-warning">{{ competence_risk.level_label }}</span>
+        {% else %}
+          <span class="badge text-bg-success">{{ competence_risk.level_label }}</span>
+        {% endif %}
+      </div>
+      <div class="text-end">
+        <div class="small text-muted">Score</div>
+        <div class="h4 mb-0">{{ competence_risk.score }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Centro único de pendências (SLA)</h2>
+      <div class="lav-meta">Fila priorizada com o que precisa ser resolvido para reduzir risco</div>
+    </div>
+    {% if pending_center %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Faixa</th>
+              <th>SLA</th>
+              <th>Vencimento</th>
+              <th class="lav-th-fit"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in pending_center %}
+            <tr>
+              <td>{{ row.title }}</td>
+              <td>
+                {% if row.bucket == 'blocked' %}
+                  <span class="badge text-bg-dark">Bloqueador</span>
+                {% elif row.bucket == 'overdue' %}
+                  <span class="badge text-bg-danger">Atrasado</span>
+                {% elif row.bucket == 'today' %}
+                  <span class="badge text-bg-warning">Hoje</span>
+                {% else %}
+                  <span class="badge text-bg-primary">Próx. 7 dias</span>
+                {% endif %}
+              </td>
+              <td class="small text-muted">{{ row.sla }}</td>
+              <td class="small text-muted">{{ row.due_date|fmt_date }}</td>
+              <td>
+                {% if row.action_url %}
+                <a class="btn btn-sm btn-outline-primary" href="{{ row.action_url }}">{{ row.action_label }}</a>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="lav-callout is-success mb-0">
+        <strong>Sem pendências críticas no momento.</strong>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
       <h2 class="h6 mb-0">Ação de hoje (automática)</h2>
       <div class="lav-meta">Prioriza o que vence hoje ou está em atraso</div>
     </div>
@@ -119,6 +197,57 @@
         {% endfor %}
       </div>
     {% endif %}
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Resumo executivo semanal</h2>
+      <div class="lav-meta">Consolidação de risco, pendências e alertas regulatórios da competência</div>
+    </div>
+    <div class="row g-3">
+      <div class="col-md-3">
+        <div class="small text-muted">Risco da competência</div>
+        <div><strong>{{ executive_summary.risk_level }}</strong> ({{ executive_summary.risk_score }})</div>
+      </div>
+      <div class="col-md-3">
+        <div class="small text-muted">Pendências totais</div>
+        <div><strong>{{ executive_summary.pending_total }}</strong></div>
+      </div>
+      <div class="col-md-3">
+        <div class="small text-muted">Bloqueadores</div>
+        <div><strong>{{ executive_summary.blocked_count }}</strong></div>
+      </div>
+      <div class="col-md-3">
+        <div class="small text-muted">Alertas legais/fiscais</div>
+        <div><strong>{{ executive_summary.legal_alerts_count }}</strong></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Monitor de mudanças legais/fiscais</h2>
+      <div class="lav-meta">Sinais automáticos de risco por vigência de tabelas e situação das guias</div>
+    </div>
+    <div class="small">
+      {% for alert in legal_monitor %}
+        <div class="mb-2">
+          {% if alert.level == 'danger' %}
+            <span class="badge text-bg-danger">Crítico</span>
+          {% elif alert.level == 'warning' %}
+            <span class="badge text-bg-warning">Atenção</span>
+          {% else %}
+            <span class="badge text-bg-success">OK</span>
+          {% endif %}
+          <strong>{{ alert.title }}</strong>
+          <div class="text-muted">{{ alert.detail }}</div>
+        </div>
+      {% endfor %}
+    </div>
   </div>
 </div>
 

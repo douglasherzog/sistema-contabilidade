@@ -126,6 +126,161 @@ def _build_home_obligations(year: int, month: int, docs: dict[str, GuideDocument
     return out
 
 
+def _pending_center_sla(bucket: str) -> str:
+    if bucket == "blocked":
+        return "Resolver antes de fechar a competencia"
+    if bucket == "overdue":
+        return "SLA estourado - tratar hoje"
+    if bucket == "today":
+        return "SLA hoje (D-0)"
+    if bucket == "next_7_days":
+        return "Planejar e resolver nesta semana"
+    return "Monitorar"
+
+
+def _build_home_pending_center(status: dict, home_obligations: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    for key, title in (
+        ("revenue", "Receitas / notas do mês"),
+        ("payroll", "Folha do mês"),
+        ("taxes", "Tabelas INSS/IRRF"),
+        ("guides", "Guias do mês"),
+    ):
+        row = status.get(key) or {}
+        if bool(row.get("ok")):
+            continue
+        out.append(
+            {
+                "source": "checklist",
+                "title": title,
+                "bucket": "blocked",
+                "sla": _pending_center_sla("blocked"),
+                "action_url": row.get("action_url"),
+                "action_label": row.get("action_label") or "Resolver",
+                "due_date": None,
+                "priority": 0,
+            }
+        )
+
+    for item in home_obligations:
+        bucket = item.get("bucket")
+        if bucket not in ("overdue", "today", "next_7_days"):
+            continue
+        priority = {"overdue": 1, "today": 2, "next_7_days": 3}.get(bucket, 4)
+        out.append(
+            {
+                "source": "agenda",
+                "title": item.get("title") or "Obrigacao",
+                "bucket": bucket,
+                "sla": _pending_center_sla(bucket),
+                "action_url": item.get("action_url"),
+                "action_label": item.get("action_label") or "Abrir fechamento",
+                "due_date": item.get("due_date"),
+                "priority": priority,
+            }
+        )
+
+    out.sort(key=lambda row: (int(row.get("priority") or 99), row.get("due_date") is None, row.get("due_date") or date.max))
+    return out
+
+
+def _compute_home_competence_risk(pending_center: list[dict]) -> dict:
+    checklist_blocked = sum(1 for item in pending_center if item.get("bucket") == "blocked")
+    overdue_count = sum(1 for item in pending_center if item.get("bucket") == "overdue")
+    today_count = sum(1 for item in pending_center if item.get("bucket") == "today")
+    next_7_count = sum(1 for item in pending_center if item.get("bucket") == "next_7_days")
+
+    score = min(100, (checklist_blocked * 20) + (overdue_count * 25) + (today_count * 15) + (next_7_count * 7))
+    if score >= 70:
+        level = "red"
+        level_label = "Risco alto"
+    elif score >= 35:
+        level = "yellow"
+        level_label = "Risco moderado"
+    else:
+        level = "green"
+        level_label = "Risco controlado"
+
+    return {
+        "score": int(score),
+        "level": level,
+        "level_label": level_label,
+        "checklist_blocked": checklist_blocked,
+        "overdue_count": overdue_count,
+        "today_count": today_count,
+        "next_7_days_count": next_7_count,
+    }
+
+
+def _build_legal_monitor(
+    *,
+    competence_date: date,
+    inss_eff: date | None,
+    irrf_eff: date | None,
+    docs: dict[str, GuideDocument | None],
+) -> list[dict]:
+    out: list[dict] = []
+
+    if not inss_eff:
+        out.append(
+            {
+                "level": "danger",
+                "title": "Tabela INSS não encontrada para a competência",
+                "detail": "Execute sync-taxes ou configure manualmente antes de fechar.",
+            }
+        )
+    if not irrf_eff:
+        out.append(
+            {
+                "level": "danger",
+                "title": "Tabela IRRF não encontrada para a competência",
+                "detail": "Execute sync-taxes ou configure manualmente antes de fechar.",
+            }
+        )
+
+    if inss_eff and (competence_date - inss_eff).days > 370:
+        out.append(
+            {
+                "level": "warning",
+                "title": "Tabela INSS potencialmente desatualizada",
+                "detail": f"Última vigência aplicada: {inss_eff.strftime('%d/%m/%Y')}.",
+            }
+        )
+    if irrf_eff and (competence_date - irrf_eff).days > 370:
+        out.append(
+            {
+                "level": "warning",
+                "title": "Tabela IRRF potencialmente desatualizada",
+                "detail": f"Última vigência aplicada: {irrf_eff.strftime('%d/%m/%Y')}.",
+            }
+        )
+
+    warning_docs = []
+    for key in ("darf", "das", "fgts"):
+        doc = docs.get(key)
+        status = (getattr(doc, "validation_status", None) or "pending") if doc else "pending"
+        if status in ("warning", "danger"):
+            warning_docs.append(key.upper())
+    if warning_docs:
+        out.append(
+            {
+                "level": "warning",
+                "title": "Guias com validação pendente/alerta",
+                "detail": f"Revisar: {', '.join(warning_docs)}.",
+            }
+        )
+
+    if not out:
+        out.append(
+            {
+                "level": "ok",
+                "title": "Sem mudanças legais críticas detectadas",
+                "detail": "Tabelas fiscais presentes e sem alertas fortes de guias.",
+            }
+        )
+    return out
+
+
 def _latest_irrf_effective(effective_date: date):
     return (
         db.session.query(TaxIrrfBracket.effective_from)
@@ -214,21 +369,25 @@ def index():
             "ok": revenue_count > 0,
             "count": revenue_count,
             "action_url": url_for("payroll.revenue_home", year=year, month=month),
+            "action_label": "Abrir Receitas",
         },
         "payroll": {
             "ok": bool(run),
             "action_url": url_for("payroll.payroll_home", year=year, month=month),
+            "action_label": "Abrir Folha",
         },
         "taxes": {
             "ok": bool(inss_eff) and bool(irrf_eff) and bool(irrf_cfg),
             "inss_eff": inss_eff,
             "irrf_eff": irrf_eff,
             "action_url": url_for("payroll.tax_config"),
+            "action_label": "Config INSS/IRRF",
         },
         "guides": {
             "ok": all(bool(docs.get(k)) and bool(getattr(docs.get(k), "filename", None)) for k in ("darf", "das", "fgts")),
             "docs": docs,
             "action_url": url_for("payroll.close_home", year=year, month=month),
+            "action_label": "Abrir Fechamento",
         },
         "vacations": {
             "ok": True,  # Always OK since no vacations is valid state
@@ -256,7 +415,27 @@ def index():
         "close": {
             "ok": bool(closed),
             "action_url": url_for("payroll.close_home", year=year, month=month),
+            "action_label": "Abrir Fechamento",
         },
+    }
+    pending_center = _build_home_pending_center(status=status, home_obligations=home_obligations)
+    competence_risk = _compute_home_competence_risk(pending_center=pending_center)
+    legal_monitor = _build_legal_monitor(
+        competence_date=comp,
+        inss_eff=inss_eff,
+        irrf_eff=irrf_eff,
+        docs=docs,
+    )
+
+    executive_summary = {
+        "risk_score": competence_risk["score"],
+        "risk_level": competence_risk["level_label"],
+        "pending_total": len(pending_center),
+        "blocked_count": competence_risk["checklist_blocked"],
+        "overdue_count": competence_risk["overdue_count"],
+        "today_count": competence_risk["today_count"],
+        "next_7_days_count": competence_risk["next_7_days_count"],
+        "legal_alerts_count": len([x for x in legal_monitor if x.get("level") in ("warning", "danger")]),
     }
 
     next_step = None
@@ -313,4 +492,8 @@ def index():
         proactive_action=proactive_action,
         overdue_items=overdue_items,
         weekly_summary=weekly_summary,
+        pending_center=pending_center,
+        competence_risk=competence_risk,
+        legal_monitor=legal_monitor,
+        executive_summary=executive_summary,
     )
