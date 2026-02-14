@@ -1,0 +1,125 @@
+{% extends 'base.html' %}
+{% block title %}13º Salário - {{ e.full_name }}{% endblock %}
+{% block content %}
+<div class="lav-page-header">
+  <div class="lav-section-title">
+    <div>
+      <h1 class="h4 mb-1 lav-page-title">13º Salário — {{ e.full_name }}</h1>
+      <div class="small lav-subtitle">Registre parcelas do 13º (1ª e 2ª) conforme CLT.</div>
+    </div>
+    <a class="btn btn-outline-secondary" href="{{ url_for('payroll.employee_detail', employee_id=e.id) }}">Voltar</a>
+  </div>
+  <div class="lav-callout mt-3">
+    <strong>CLT (Lei)</strong>
+    <div class="small">1ª parcela: até <strong>30 de novembro</strong>. 2ª parcela: até <strong>20 de dezembro</strong>. Descontos de INSS/IRRF aplicam-se na 2ª parcela.</div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Competência do pagamento</h2>
+      <div class="lav-meta">Selecione o ano/mês de pagamento.</div>
+    </div>
+
+    <form method="get" action="{{ url_for('payroll.employee_thirteenth', employee_id=e.id) }}" class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label" for="year">Ano</label>
+        <input class="form-control" id="year" name="year" value="{{ year }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="month">Mês</label>
+        <input class="form-control" id="month" name="month" value="{{ month }}" required>
+      </div>
+      <div class="col-12">
+        <button class="btn btn-outline-secondary" type="submit">Abrir competência</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Registrar pagamento</h2>
+      <div class="lav-meta">1ª parcela (até 30/nov), 2ª parcela (até 20/dez) ou integral.</div>
+    </div>
+
+    <form method="post" action="{{ url_for('payroll.employee_thirteenth_add', employee_id=e.id) }}" class="row g-2">
+      <input type="hidden" name="payment_year" value="{{ year }}">
+      <input type="hidden" name="payment_month" value="{{ month }}">
+
+      <div class="col-md-4">
+        <label class="form-label" for="reference_year">Ano de referência</label>
+        <input class="form-control" id="reference_year" name="reference_year" value="{{ year }}" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="pay_date">Data do pagamento</label>
+        <input class="form-control js-date" id="pay_date" name="pay_date" placeholder="dd/mm/aaaa" inputmode="numeric">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="months_worked">Meses trabalhados (1-12)</label>
+        <input class="form-control" id="months_worked" name="months_worked" value="12" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="payment_type">Tipo</label>
+        <select class="form-select" id="payment_type" name="payment_type" required>
+          <option value="1st_installment">1ª parcela</option>
+          <option value="2nd_installment">2ª parcela</option>
+          <option value="full">Integral (único pagamento)</option>
+        </select>
+      </div>
+
+      <div class="col-12">
+        <button class="btn btn-primary" type="submit">Registrar 13º</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Histórico</h2>
+      <div class="lav-meta">Parcelas registradas para este funcionário.</div>
+    </div>
+
+    {% if not rows %}
+      <div class="text-muted small">Nenhum 13º registrado ainda.</div>
+    {% else %}
+      <div class="table-responsive">
+        <table class="table table-sm table-striped align-middle">
+          <thead>
+            <tr>
+              <th>Referência</th>
+              <th>Pagamento</th>
+              <th>Tipo</th>
+              <th class="text-end">Meses</th>
+              <th class="text-end">Bruto</th>
+              <th class="lav-th-fit"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td class="text-muted">{{ r.reference_year }}</td>
+              <td class="text-muted">{{ '%02d'|format(r.payment_month) }}/{{ r.payment_year }}</td>
+              <td>
+                {% if r.payment_type == '1st_installment' %}1ª parcela
+                {% elif r.payment_type == '2nd_installment' %}2ª parcela
+                {% else %}Integral{% endif %}
+              </td>
+              <td class="text-end">{{ r.months_worked }}</td>
+              <td class="text-end"><strong>R$ {{ '%.2f'|format(r.gross_amount or 0) }}</strong></td>
+              <td class="text-end">
+                <a class="btn btn-sm btn-outline-secondary" target="_blank" href="{{ url_for('payroll.thirteenth_receipt', thirteenth_id=r.id) }}">Recibo</a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

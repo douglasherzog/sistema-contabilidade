@@ -293,7 +293,55 @@ def main() -> int:
     if not vac_count_re:
         raise RuntimeError("Close page missing vacation count")
 
-    print("[7.5] Register one revenue note")
+    print("[7.5] Register 13th salary and validate receipt")
+    _request(
+        opener,
+        "POST",
+        f"/payroll/employees/{deise_id}/thirteenth",
+        {
+            "reference_year": str(test_year),
+            "payment_year": str(test_year),
+            "payment_month": str(test_month),
+            "pay_date": f"{test_year}-{test_month:02d}-15",
+            "months_worked": "12",
+            "payment_type": "2nd_installment",
+        },
+    )
+    thirteenth_page = _request(
+        opener,
+        "GET",
+        f"/payroll/employees/{deise_id}/thirteenth?year={test_year}&month={test_month}",
+    ).read().decode("utf-8", errors="replace")
+    if "13º Salário" not in thirteenth_page:
+        raise RuntimeError("13th page title not found")
+    if "2ª parcela" not in thirteenth_page:
+        raise RuntimeError("13th payment type not found in page")
+    # Extract 13th id from the receipt link
+    thirteenth_id_match = re.search(r"/thirteenth/(\d+)/receipt", thirteenth_page)
+    if not thirteenth_id_match:
+        raise RuntimeError("Could not find 13th receipt link")
+    thirteenth_id = int(thirteenth_id_match.group(1))
+    thirteenth_rec_page = _request(opener, "GET", f"/payroll/thirteenth/{thirteenth_id}/receipt").read().decode("utf-8", errors="replace")
+    if "Recibo 13º" not in thirteenth_rec_page:
+        raise RuntimeError("13th receipt page title not found")
+    if "Deise" not in thirteenth_rec_page:
+        raise RuntimeError("Employee name not found in 13th receipt")
+    if "CLT" not in thirteenth_rec_page:
+        raise RuntimeError("CLT reference not found in 13th receipt")
+
+    print("[7.6] Validate 13th appears in closing summary")
+    close_page_13th = _request(
+        opener,
+        "GET",
+        f"/payroll/close?year={test_year}&month={test_month}",
+    ).read().decode("utf-8", errors="replace")
+    if "13º no mês" not in close_page_13th:
+        raise RuntimeError("Close page missing 13th section")
+    thirteenth_count_re = re.search(r"<strong>\s*1\s*</strong>\s*registro", close_page_13th, re.IGNORECASE)
+    if not thirteenth_count_re:
+        raise RuntimeError("Close page missing 13th count")
+
+    print("[7.7] Register one revenue note")
     _request(
         opener,
         "POST",

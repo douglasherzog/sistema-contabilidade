@@ -174,6 +174,49 @@ class EmployeeVacation(db.Model):
     )
 
 
+class EmployeeThirteenth(db.Model):
+    """13º salário - conforme CLT (parcelas e regras de pagamento)."""
+
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("employee.id"), nullable=False, index=True)
+
+    # Ano de referência (ano-base para o cálculo do 13º)
+    reference_year = db.Column(db.Integer, nullable=False, index=True)
+
+    # Competência de pagamento (qual mês o pagamento foi/será feito)
+    payment_year = db.Column(db.Integer, nullable=False)
+    payment_month = db.Column(db.Integer, nullable=False)
+
+    # Tipo de pagamento: 1st_installment, 2nd_installment, full
+    payment_type = db.Column(db.String(20), nullable=False, default="1st_installment")
+
+    # Data do pagamento
+    pay_date = db.Column(db.Date, nullable=True)
+
+    # Salário base no momento do cálculo (snapshot)
+    base_salary_at_calc = db.Column(db.Numeric(12, 2), nullable=False, default=0)
+
+    # Meses trabalhados no ano (1 a 12)
+    months_worked = db.Column(db.Integer, nullable=False, default=12)
+
+    # Valores calculados
+    gross_amount = db.Column(db.Numeric(12, 2), nullable=False, default=0)  # (salário / 12) * meses
+
+    # Descontos estimados
+    inss_est = db.Column(db.Numeric(12, 2), nullable=True)
+    irrf_est = db.Column(db.Numeric(12, 2), nullable=True)
+    net_est = db.Column(db.Numeric(12, 2), nullable=True)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    employee = db.relationship("Employee")
+
+    __table_args__ = (
+        db.Index("ix_employee_thirteenth_ref_year", "reference_year"),
+        db.Index("ix_employee_thirteenth_payment", "payment_year", "payment_month"),
+    )
+
+
 class TaxInssBracket(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     effective_from = db.Column(db.Date, nullable=False, index=True)

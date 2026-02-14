@@ -7,6 +7,7 @@ from flask_login import login_required, current_user
 from .extensions import db
 from .models import (
     CompetenceClose,
+    EmployeeThirteenth,
     EmployeeVacation,
     GuideDocument,
     PayrollRun,
@@ -78,6 +79,11 @@ def index():
     vac_count = len(vac_rows)
     vac_total = sum([Decimal(str(r.gross_total or 0)) for r in vac_rows], Decimal("0")).quantize(Decimal("0.01"))
 
+    # 13th salary summary for the month
+    thirteenth_rows = EmployeeThirteenth.query.filter_by(payment_year=year, payment_month=month).all()
+    thirteenth_count = len(thirteenth_rows)
+    thirteenth_total = sum([Decimal(str(r.gross_amount or 0)) for r in thirteenth_rows], Decimal("0")).quantize(Decimal("0.01"))
+
     closed = CompetenceClose.query.filter_by(year=year, month=month).first()
 
     status = {
@@ -110,6 +116,12 @@ def index():
             "ok": True,  # Always OK since no vacations is valid state
             "count": vac_count,
             "total_gross": vac_total,
+            "action_url": url_for("payroll.employees"),
+        },
+        "thirteenth": {
+            "ok": True,  # Always OK since no 13th is valid state
+            "count": thirteenth_count,
+            "total_gross": thirteenth_total,
             "action_url": url_for("payroll.employees"),
         },
         "close": {

@@ -13,8 +13,9 @@ from .models import (
     CompetenceClose,
     Employee,
     EmployeeDependent,
-    EmployeeVacation,
     EmployeeSalary,
+    EmployeeThirteenth,
+    EmployeeVacation,
     GuideDocument,
     RevenueNote,
     PayrollLine,
@@ -420,6 +421,161 @@ def vacation_receipt(vac_id: int):
     )
 
 
+# =============================================================================
+# 13º SALÁRIO (DECIMO TERCEIRO) - Conforme CLT
+# =============================================================================
+
+def _calc_thirteenth_amount(base_salary: Decimal, months_worked: int) -> dict:
+    """Cálculo CLT: (salário / 12) × meses trabalhados."""
+    m = max(1, min(12, int(months_worked or 12)))
+    monthly_part = (base_salary / Decimal("12")).quantize(Decimal("0.01"))
+    gross = (monthly_part * Decimal(str(m))).quantize(Decimal("0.01"))
+    return {
+        "monthly_part": monthly_part,
+        "months_worked": m,
+        "gross_amount": gross,
+    }
+
+
+def _calc_thirteenth_month_summary(year: int, month: int) -> dict:
+    """Resumo de 13º registrados na competência."""
+    rows = EmployeeThirteenth.query.filter_by(payment_year=int(year), payment_month=int(month)).all()
+    total = Decimal("0")
+    for r in rows:
+        try:
+            total += Decimal(str(r.gross_amount or 0))
+        except Exception:
+            total += Decimal("0")
+    total = total.quantize(Decimal("0.01"))
+    return {
+        "count": len(rows),
+        "total_gross": total,
+    }
+
+
+@payroll_bp.get("/employees/<int:employee_id>/thirteenth")
+@login_required
+def employee_thirteenth(employee_id: int):
+    """Tela de gestão do 13º salário por funcionário."""
+    e = Employee.query.get_or_404(employee_id)
+    now = datetime.now()
+    year = int(request.args.get("year") or now.year)
+    month = int(request.args.get("month") or now.month)
+    rows = EmployeeThirteenth.query.filter_by(employee_id=e.id).order_by(
+        EmployeeThirteenth.reference_year.desc(),
+        EmployeeThirteenth.payment_year.desc(),
+        EmployeeThirteenth.payment_month.desc(),
+    ).all()
+    return render_template(
+        "payroll/employee_thirteenth.html",
+        e=e,
+        year=year,
+        month=month,
+        rows=rows,
+    )
+
+
+@payroll_bp.post("/employees/<int:employee_id>/thirteenth")
+@login_required
+def employee_thirteenth_add(employee_id: int):
+    """Cadastra pagamento de 13º (1ª parcela, 2ª parcela ou integral)."""
+    e = Employee.query.get_or_404(employee_id)
+    ref_year = int(request.form.get("reference_year") or 0)
+    pay_year = int(request.form.get("payment_year") or 0)
+    pay_month = int(request.form.get("payment_month") or 0)
+    pay_date = _parse_date(request.form.get("pay_date"))
+    months_worked = int(request.form.get("months_worked") or 12)
+    payment_type = (request.form.get("payment_type") or "").strip().lower()
+
+    if ref_year < 2000 or pay_year < 2000 or pay_month < 1 or pay_month > 12:
+        flash("Datas inválidas.", "warning")
+        return redirect(url_for("payroll.employee_thirteenth", employee_id=e.id))
+
+    if payment_type not in ("1st_installment", "2nd_installment", "full"):
+        flash("Tipo de pagamento inválido.", "warning")
+        return redirect(url_for("payroll.employee_thirteenth", employee_id=e.id, year=pay_year, month=pay_month))
+
+    if months_worked < 1 or months_worked > 12:
+        flash("Meses trabalhados devem ser entre 1 e 12.", "warning")
+        return redirect(url_for("payroll.employee_thirteenth", employee_id=e.id, year=pay_year, month=pay_month))
+
+    # Usa salário do mês de pagamento como base
+    base_salary = _salary_for_employee(e, pay_year, pay_month)
+    amounts = _calc_thirteenth_amount(base_salary, months_worked)
+
+    # Estimativa de descontos apenas para 2ª parcela (conforme CLT)
+    comp = _competence_start(pay_year, pay_month)
+    deps_count = EmployeeDependent.query.filter_by(employee_id=e.id).count()
+    inss_eff, inss_rows = _latest_inss_brackets(comp)
+    irrf_cfg = _latest_irrf_config(comp)
+    irrf_eff, irrf_rows = _latest_irrf_brackets(comp)
+
+    inss_est = None
+    irrf_est = None
+    net_est = None
+    gross = amounts["gross_amount"]
+
+    # CLT: descontos aplicam-se na 2ª parcela (ou no integral se for único pagamento)
+    apply_discounts = payment_type in ("2nd_installment", "full")
+    if apply_discounts and inss_rows:
+        inss_est = _calc_inss_progressive(gross, inss_rows)
+    if apply_discounts and irrf_rows and irrf_cfg and inss_est is not None:
+        irrf_est = _calc_irrf(gross - inss_est, irrf_cfg, irrf_rows, deps_count)
+    if inss_est is not None and irrf_est is not None:
+        net_est = (gross - inss_est - irrf_est).quantize(Decimal("0.01"))
+
+    row = EmployeeThirteenth(
+        employee_id=e.id,
+        reference_year=ref_year,
+        payment_year=pay_year,
+        payment_month=pay_month,
+        payment_type=payment_type,
+        pay_date=pay_date,
+        base_salary_at_calc=base_salary,
+        months_worked=amounts["months_worked"],
+        gross_amount=amounts["gross_amount"],
+        inss_est=inss_est,
+        irrf_est=irrf_est,
+        net_est=net_est,
+    )
+    db.session.add(row)
+    db.session.commit()
+
+    flash("13º salário registrado.", "success")
+    return redirect(url_for("payroll.employee_thirteenth", employee_id=e.id, year=pay_year, month=pay_month))
+
+
+@payroll_bp.get("/thirteenth/<int:thirteenth_id>/receipt")
+@login_required
+def thirteenth_receipt(thirteenth_id: int):
+    """Recibo imprimível do 13º salário."""
+    t = EmployeeThirteenth.query.get_or_404(thirteenth_id)
+
+    comp = _competence_start(int(t.payment_year), int(t.payment_month))
+    inss_eff, inss_rows = _latest_inss_brackets(comp)
+    irrf_cfg = _latest_irrf_config(comp)
+    irrf_eff, irrf_rows = _latest_irrf_brackets(comp)
+
+    # CLT: avisos sobre prazos
+    clt_warnings = []
+    if t.payment_type == "1st_installment":
+        if int(t.payment_month) != 11:
+            clt_warnings.append("CLT: 1ª parcela idealmente paga em novembro.")
+    elif t.payment_type == "2nd_installment":
+        if int(t.payment_month) != 12:
+            clt_warnings.append("CLT: 2ª parcela deve ser paga até 20 de dezembro.")
+
+    return render_template(
+        "payroll/thirteenth_receipt.html",
+        t=t,
+        employee=t.employee,
+        inss_eff=inss_eff,
+        irrf_eff=irrf_eff,
+        has_tables=bool(inss_rows) and bool(irrf_rows) and bool(irrf_cfg),
+        clt_warnings=clt_warnings,
+    )
+
+
 @payroll_bp.post("/employees/<int:employee_id>/salary")
 @login_required
 def employee_add_salary(employee_id: int):
@@ -691,6 +847,7 @@ def close_home():
     summary = _calc_month_summary(run)
     revenue_summary = _calc_revenue_month_summary(year, month)
     vacations_summary = _calc_vacations_month_summary(year, month)
+    thirteenth_summary = _calc_thirteenth_month_summary(year, month)
 
     checklist = {
         "revenue": {
@@ -736,6 +893,17 @@ def close_home():
                 "total_gross": vacations_summary.get("total_gross"),
             },
         },
+        "thirteenth": {
+            "ok": True,
+            "title": "13º no mês",
+            "help": "Registre parcelas do 13º (1ª até 30/nov, 2ª até 20/dez) para controle.",
+            "action_url": url_for("payroll.employees"),
+            "action_label": "Ver funcionários",
+            "meta": {
+                "count": int(thirteenth_summary.get("count") or 0),
+                "total_gross": thirteenth_summary.get("total_gross"),
+            },
+        },
     }
 
     return render_template(
@@ -749,6 +917,7 @@ def close_home():
         summary=summary,
         revenue_summary=revenue_summary,
         vacations_summary=vacations_summary,
+        thirteenth_summary=thirteenth_summary,
     )
 
 
