@@ -154,6 +154,55 @@ def _calc_irrf(base: Decimal, cfg: TaxIrrfConfig | None, brackets: list[TaxIrrfB
     return val.quantize(Decimal("0.01"))
 
 
+def _calc_month_summary(run: PayrollRun | None) -> dict | None:
+    if not run:
+        return None
+
+    comp = date(int(run.year), int(run.month), 1)
+    lines = PayrollLine.query.filter_by(payroll_run_id=run.id).all()
+
+    total_gross = Decimal("0")
+    total_inss = Decimal("0")
+    total_irrf = Decimal("0")
+
+    inss_eff, inss_rows = _latest_inss_brackets(comp)
+    irrf_cfg = _latest_irrf_config(comp)
+    irrf_eff, irrf_rows = _latest_irrf_brackets(comp)
+
+    for ln in lines:
+        gross = (Decimal(str(ln.gross_total or 0)) if ln.gross_total is not None else Decimal("0"))
+        total_gross += gross
+
+        deps_count = EmployeeDependent.query.filter_by(employee_id=ln.employee_id).count()
+        inss_est = Decimal("0")
+        if inss_rows:
+            inss_est = _calc_inss_progressive(gross, inss_rows)
+        total_inss += inss_est
+
+        irrf_est = Decimal("0")
+        if irrf_rows and irrf_cfg:
+            irrf_est = _calc_irrf(gross - inss_est, irrf_cfg, irrf_rows, deps_count)
+        total_irrf += irrf_est
+
+    total_gross = total_gross.quantize(Decimal("0.01"))
+    total_inss = total_inss.quantize(Decimal("0.01"))
+    total_irrf = total_irrf.quantize(Decimal("0.01"))
+    total_net = (total_gross - total_inss - total_irrf).quantize(Decimal("0.01"))
+
+    return {
+        "year": int(run.year),
+        "month": int(run.month),
+        "employees_count": len(lines),
+        "total_gross": total_gross,
+        "total_inss_est": (total_inss if inss_rows else None),
+        "total_irrf_est": (total_irrf if (irrf_rows and irrf_cfg) else None),
+        "total_net_est": (total_net if (inss_rows and irrf_rows and irrf_cfg) else None),
+        "inss_eff": inss_eff,
+        "irrf_eff": irrf_eff,
+        "has_tables": bool(inss_rows) and bool(irrf_rows) and bool(irrf_cfg),
+    }
+
+
 @payroll_bp.get("/employees")
 @login_required
 def employees():
@@ -466,6 +515,8 @@ def close_home():
         "fgts": GuideDocument.query.filter_by(year=year, month=month, doc_type="fgts").first(),
     }
 
+    summary = _calc_month_summary(run)
+
     checklist = {
         "payroll": {
             "ok": bool(run),
@@ -502,6 +553,7 @@ def close_home():
         run=run,
         closed=closed,
         checklist=checklist,
+        summary=summary,
     )
 
 

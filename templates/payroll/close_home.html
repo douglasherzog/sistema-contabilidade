@@ -82,6 +82,69 @@
   {% endfor %}
 </div>
 
+<div class="card mb-3">
+  <div class="card-body">
+    <h2 class="h6 mb-2">Resumo do mês (estimativa)</h2>
+    <div class="text-muted small mb-3">
+      Este resumo ajuda você a conferir o mês rapidamente. Os valores de INSS/IRRF aqui são <strong>estimativas</strong> baseadas na folha e nas tabelas configuradas.
+    </div>
+
+    {% if not summary %}
+      <div class="text-muted small">Ainda não existe folha para esta competência. Crie a folha para ver o resumo.</div>
+    {% else %}
+      <div class="row g-3">
+        <div class="col-md-3">
+          <div class="small text-muted">Funcionários na folha</div>
+          <div><strong>{{ summary.employees_count }}</strong></div>
+        </div>
+        <div class="col-md-3">
+          <div class="small text-muted">Total bruto</div>
+          <div><strong>R$ {{ '%.2f'|format(summary.total_gross or 0) }}</strong></div>
+        </div>
+        <div class="col-md-3">
+          <div class="small text-muted">INSS estimado (empregado)</div>
+          <div>
+            {% if summary.total_inss_est is none %}
+              <span class="text-muted">— (tabelas não configuradas)</span>
+            {% else %}
+              <strong>R$ {{ '%.2f'|format(summary.total_inss_est) }}</strong>
+            {% endif %}
+          </div>
+        </div>
+        <div class="col-md-3">
+          <div class="small text-muted">IRRF estimado</div>
+          <div>
+            {% if summary.total_irrf_est is none %}
+              <span class="text-muted">— (tabelas/config não configuradas)</span>
+            {% else %}
+              <strong>R$ {{ '%.2f'|format(summary.total_irrf_est) }}</strong>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+
+      <hr>
+
+      <div class="d-flex justify-content-between align-items-start">
+        <div>
+          <div class="small text-muted">Líquido estimado (bruto - INSS - IRRF)</div>
+          <div>
+            {% if summary.total_net_est is none %}
+              <span class="text-muted">— (configure as tabelas para calcular)</span>
+            {% else %}
+              <strong>R$ {{ '%.2f'|format(summary.total_net_est) }}</strong>
+            {% endif %}
+          </div>
+        </div>
+        <div class="small text-muted text-end">
+          INSS: {{ summary.inss_eff.isoformat() if summary.inss_eff else '—' }}<br>
+          IRRF: {{ summary.irrf_eff.isoformat() if summary.irrf_eff else '—' }}
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
 <div class="row g-3">
   {% for dtype, label in { 'darf': 'DARF (Receita Federal)', 'das': 'DAS (Simples Nacional)', 'fgts': 'FGTS Digital (GFD)' }.items() %}
   {% set doc = docs.get(dtype) %}

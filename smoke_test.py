@@ -276,6 +276,9 @@ def main() -> int:
     if expected_guide not in close_page:
         raise RuntimeError("Expected DAS guide link not found in close page")
 
+    if "Resumo do mês" not in close_page or "Total bruto" not in close_page:
+        raise RuntimeError("Close page did not show the monthly summary block")
+
     print("[10] Mark competence as closed (warn-only)")
     _request(opener, "POST", "/payroll/close/mark", {"year": str(test_year), "month": str(test_month)})
     close_page2 = _request(
