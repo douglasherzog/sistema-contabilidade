@@ -1,0 +1,161 @@
+{% extends 'base.html' %}
+{% block title %}Cadastro oficial da empresa - Sistema Contabilidade{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h4 mb-1">Cadastro oficial da empresa</h1>
+    <div class="small text-muted">Base mínima para habilitar geração assistida de eventos eSocial (S-1000/S-1005).</div>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('payroll.help_page', slug='empresa_oficial') }}">Ajuda desta tela</a>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Prontidão oficial</h2>
+      <div class="lav-meta">Checklist automático do cadastro mínimo obrigatório</div>
+    </div>
+
+    <div class="d-flex justify-content-between align-items-start mb-2">
+      <div>
+        {% if readiness.ok %}
+          <span class="badge text-bg-success">Cadastro pronto para modo assistido</span>
+        {% else %}
+          <span class="badge text-bg-warning">Cadastro incompleto</span>
+        {% endif %}
+      </div>
+      <div class="small text-muted">Pendências: <strong>{{ readiness.missing_count }}</strong></div>
+    </div>
+
+    <div class="small">
+      {% for row in readiness.checks %}
+        <div>
+          {% if row.ok %}
+            <span class="badge text-bg-success">OK</span>
+          {% else %}
+            <span class="badge text-bg-warning">Pendente</span>
+          {% endif %}
+          {{ row.name }}
+        </div>
+      {% endfor %}
+    </div>
+
+    {% if not readiness.ok %}
+      <hr>
+      <div class="small text-muted">Faltando para habilitar integração assistida:</div>
+      <div class="small">
+        {% for name in readiness.missing %}
+          <div>• {{ name }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Dados oficiais mínimos</h2>
+      <div class="lav-meta">Preencha com os dados do cadastro real da empresa e responsável legal</div>
+    </div>
+
+    <form method="post" action="{{ url_for('payroll.company_profile_save') }}" class="row g-2 align-items-end">
+      <div class="col-md-6">
+        <label class="form-label" for="legal_name">Razão social</label>
+        <input class="form-control" id="legal_name" name="legal_name" value="{{ company.legal_name }}" required>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label" for="trade_name">Nome fantasia</label>
+        <input class="form-control" id="trade_name" name="trade_name" value="{{ company.trade_name }}">
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label" for="cnpj">CNPJ</label>
+        <input class="form-control" id="cnpj" name="cnpj" value="{{ company.cnpj }}" placeholder="Somente números" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="cnae">CNAE principal</label>
+        <input class="form-control" id="cnae" name="cnae" value="{{ company.cnae }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="tax_regime">Regime tributário</label>
+        <select class="form-select" id="tax_regime" name="tax_regime" required>
+          <option value="">Selecione...</option>
+          <option value="simples" {% if company.tax_regime == 'simples' %}selected{% endif %}>Simples Nacional</option>
+          <option value="presumido" {% if company.tax_regime == 'presumido' %}selected{% endif %}>Lucro Presumido</option>
+          <option value="real" {% if company.tax_regime == 'real' %}selected{% endif %}>Lucro Real</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="esocial_classification">classTrib (eSocial)</label>
+        <input class="form-control" id="esocial_classification" name="esocial_classification" value="{{ company.esocial_classification }}" required>
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label" for="company_size">Porte da empresa</label>
+        <select class="form-select" id="company_size" name="company_size" required>
+          <option value="">Selecione...</option>
+          <option value="micro" {% if company.company_size == 'micro' %}selected{% endif %}>Micro</option>
+          <option value="small" {% if company.company_size == 'small' %}selected{% endif %}>Pequena</option>
+          <option value="medium" {% if company.company_size == 'medium' %}selected{% endif %}>Média</option>
+          <option value="large" {% if company.company_size == 'large' %}selected{% endif %}>Grande</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="city">Cidade</label>
+        <input class="form-control" id="city" name="city" value="{{ company.city }}" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="state">UF</label>
+        <input class="form-control" id="state" name="state" value="{{ company.state }}" maxlength="2" required>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="payroll_tax_relief">Desoneração da folha</label>
+        <select class="form-select" id="payroll_tax_relief" name="payroll_tax_relief">
+          <option value="0" {% if not company.payroll_tax_relief %}selected{% endif %}>Não</option>
+          <option value="1" {% if company.payroll_tax_relief %}selected{% endif %}>Sim</option>
+        </select>
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label" for="state_registration">Inscrição estadual (opcional)</label>
+        <input class="form-control" id="state_registration" name="state_registration" value="{{ company.state_registration or '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="municipal_registration">Inscrição municipal (opcional)</label>
+        <input class="form-control" id="municipal_registration" name="municipal_registration" value="{{ company.municipal_registration or '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="establishment_cnpj">CNPJ estabelecimento (opcional)</label>
+        <input class="form-control" id="establishment_cnpj" name="establishment_cnpj" value="{{ company.establishment_cnpj or '' }}">
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="establishment_cnae">CNAE estabelecimento (opcional)</label>
+        <input class="form-control" id="establishment_cnae" name="establishment_cnae" value="{{ company.establishment_cnae or '' }}">
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label" for="responsible_name">Responsável legal</label>
+        <input class="form-control" id="responsible_name" name="responsible_name" value="{{ company.responsible_name }}" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label" for="responsible_cpf">CPF responsável</label>
+        <input class="form-control" id="responsible_cpf" name="responsible_cpf" value="{{ company.responsible_cpf }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="responsible_email">E-mail responsável</label>
+        <input class="form-control" id="responsible_email" name="responsible_email" value="{{ company.responsible_email }}" required>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label" for="responsible_phone">Telefone responsável (opcional)</label>
+        <input class="form-control" id="responsible_phone" name="responsible_phone" value="{{ company.responsible_phone or '' }}">
+      </div>
+
+      <div class="col-12">
+        <button class="btn btn-primary" type="submit">Salvar cadastro oficial mínimo</button>
+        <a class="btn btn-outline-primary" href="{{ url_for('payroll.esocial_assisted_home') }}">Abrir eSocial assistido</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

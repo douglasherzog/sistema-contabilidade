@@ -3,14 +3,18 @@ from __future__ import annotations
 import os
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from xml.sax.saxutils import escape as xml_escape
 
 from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
+from lxml import etree
 from werkzeug.utils import secure_filename
 
 from .extensions import db
 from .models import (
+    Company,
     CompetenceClose,
+    EsocialSubmission,
     Employee,
     EmployeeDependent,
     EmployeeLeave,
@@ -46,6 +50,21 @@ TUTORIALS: dict[str, dict] = {
             "Abra a competência correta no topo da tela.",
             "Siga a ordem sugerida pelo sistema: Receitas -> Folha -> Tabelas -> Fechamento.",
             "Use os cards de Férias/13º/Rescisões/Afastamentos para registrar eventos do mês.",
+        ],
+    },
+    "empresa_oficial": {
+        "title": "Cadastro oficial da empresa",
+        "goal": "Preencher o mínimo oficial para habilitar integração assistida com eSocial.",
+        "first_step": "Preencha CNPJ, regime, classTrib e dados do responsável legal.",
+        "fields": [
+            {"name": "CNPJ e CNAE", "explain": "Base cadastral da empresa/estabelecimento."},
+            {"name": "Regime e classTrib", "explain": "Regras tributárias para eventos oficiais."},
+            {"name": "Responsável", "explain": "Nome, CPF e e-mail para rastreabilidade eSocial."},
+        ],
+        "steps": [
+            "Preencha os campos obrigatórios e salve.",
+            "Conferir checklist de prontidão oficial na própria tela.",
+            "Gerar XML S-1000/S-1005 no modo assistido e registrar protocolo manual.",
         ],
     },
     "modo_guiado": {
@@ -552,6 +571,12 @@ def _media_guides_dir() -> str:
     return p
 
 
+def _media_esocial_dir() -> str:
+    p = os.path.join(current_app.instance_path, "media", "esocial")
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
 def _add_evidence_event(
     *,
     year: int,
@@ -624,6 +649,412 @@ def _validate_guide_document(
         "warnings": warnings,
         "dangers": dangers,
     }
+
+
+def _is_valid_cnpj(v: str | None) -> bool:
+    cnpj = _digits_only(v)
+    if len(cnpj) != 14:
+        return False
+    if cnpj == cnpj[0] * 14:
+        return False
+
+    def _digit(base: str, weights: list[int]) -> int:
+        total = sum(int(base[i]) * weights[i] for i in range(len(weights)))
+        mod = total % 11
+        return 0 if mod < 2 else 11 - mod
+
+    d1 = _digit(cnpj[:12], [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+    d2 = _digit(cnpj[:12] + str(d1), [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+    return cnpj[-2:] == f"{d1}{d2}"
+
+
+def _company_row() -> Company:
+    row = Company.query.order_by(Company.id.asc()).first()
+    if row:
+        return row
+    row = Company()
+    db.session.add(row)
+    db.session.commit()
+    return row
+
+
+def _validate_company_official_minimum(payload: dict) -> list[str]:
+    errors: list[str] = []
+
+    cnpj = payload.get("cnpj")
+    if not cnpj:
+        errors.append("Informe o CNPJ da empresa.")
+    elif not _is_valid_cnpj(cnpj):
+        errors.append("CNPJ inválido. Verifique os 14 dígitos.")
+
+    if not payload.get("legal_name"):
+        errors.append("Informe a razão social.")
+    if not payload.get("cnae"):
+        errors.append("Informe o CNAE principal.")
+    if payload.get("tax_regime") not in {"simples", "presumido", "real"}:
+        errors.append("Selecione um regime tributário válido.")
+    if not payload.get("esocial_classification"):
+        errors.append("Informe a classificação tributária eSocial (classTrib).")
+    if payload.get("company_size") not in {"micro", "small", "medium", "large"}:
+        errors.append("Selecione o porte da empresa.")
+    if not payload.get("city") or not payload.get("state"):
+        errors.append("Informe cidade e UF.")
+    elif len((payload.get("state") or "").strip()) != 2:
+        errors.append("UF deve conter 2 letras (ex.: RS).")
+
+    if not payload.get("responsible_name"):
+        errors.append("Informe o responsável legal.")
+    resp_cpf = payload.get("responsible_cpf")
+    if not resp_cpf:
+        errors.append("Informe o CPF do responsável legal.")
+    elif not _is_valid_cpf(resp_cpf):
+        errors.append("CPF do responsável inválido.")
+
+    resp_email = (payload.get("responsible_email") or "").strip()
+    if not resp_email or "@" not in resp_email:
+        errors.append("Informe um e-mail válido do responsável.")
+
+    est_cnpj = payload.get("establishment_cnpj")
+    if est_cnpj and not _is_valid_cnpj(est_cnpj):
+        errors.append("CNPJ do estabelecimento inválido.")
+
+    return errors
+
+
+def _company_official_readiness(company: Company) -> dict:
+    checks = [
+        ("CNPJ válido", bool(company.cnpj) and _is_valid_cnpj(company.cnpj)),
+        ("Razão social", bool((company.legal_name or "").strip())),
+        ("CNAE principal", bool((company.cnae or "").strip())),
+        ("Regime tributário", bool((company.tax_regime or "").strip())),
+        ("classTrib eSocial", bool((company.esocial_classification or "").strip())),
+        ("Porte da empresa", bool((company.company_size or "").strip())),
+        ("Cidade/UF", bool((company.city or "").strip()) and bool((company.state or "").strip())),
+        ("Responsável legal", bool((company.responsible_name or "").strip())),
+        ("CPF do responsável", bool(company.responsible_cpf) and _is_valid_cpf(company.responsible_cpf)),
+        ("E-mail do responsável", bool((company.responsible_email or "").strip()) and "@" in (company.responsible_email or "")),
+    ]
+    missing = [name for name, ok in checks if not ok]
+    return {
+        "ok": len(missing) == 0,
+        "checks": [{"name": name, "ok": ok} for name, ok in checks],
+        "missing": missing,
+        "missing_count": len(missing),
+    }
+
+
+def _esocial_schema_dir() -> str:
+    return os.path.join(os.path.dirname(__file__), "schemas", "esocial", "v_s_01_03_00")
+
+
+def _esocial_xsd_path(event_type: str) -> str | None:
+    mapping = {
+        "S-1000": "evtInfoEmpregador.xsd",
+        "S-1005": "evtTabEstab.xsd",
+    }
+    name = mapping.get((event_type or "").upper())
+    if not name:
+        return None
+    return os.path.join(_esocial_schema_dir(), name)
+
+
+def _esocial_schema_readiness() -> dict:
+    checks = []
+    for event_type in ("S-1000", "S-1005"):
+        p = _esocial_xsd_path(event_type)
+        ok = bool(p and os.path.exists(p))
+        checks.append({"event_type": event_type, "ok": ok, "path": p})
+    return {
+        "ok": all(row["ok"] for row in checks),
+        "checks": checks,
+    }
+
+
+def _esocial_event_id() -> str:
+    stamp = datetime.utcnow().strftime("%Y%m%d%H%M%S%f")
+    tail = "".join(str(b % 10) for b in os.urandom(14))
+    token = (stamp + tail)[:34]
+    return f"ID{token}"
+
+
+def _esocial_dummy_signature() -> str:
+    return (
+        "  <ds:Signature>\n"
+        "    <ds:SignedInfo>\n"
+        "      <ds:CanonicalizationMethod Algorithm=\"http://www.w3.org/TR/2001/REC-xml-c14n-20010315\"/>\n"
+        "      <ds:SignatureMethod Algorithm=\"http://www.w3.org/2000/09/xmldsig#rsa-sha1\"/>\n"
+        "      <ds:Reference URI=\"\">\n"
+        "        <ds:DigestMethod Algorithm=\"http://www.w3.org/2000/09/xmldsig#sha1\"/>\n"
+        "        <ds:DigestValue>AA==</ds:DigestValue>\n"
+        "      </ds:Reference>\n"
+        "    </ds:SignedInfo>\n"
+        "    <ds:SignatureValue>AA==</ds:SignatureValue>\n"
+        "  </ds:Signature>\n"
+    )
+
+
+def _validate_esocial_xml_xsd(event_type: str, xml_content: str) -> dict:
+    xsd_path = _esocial_xsd_path(event_type)
+    if not xsd_path or not os.path.exists(xsd_path):
+        return {
+            "status": "warning",
+            "summary": "Schema XSD não localizado para o evento.",
+            "errors": [f"Arquivo ausente: {xsd_path}"],
+        }
+
+    try:
+        schema_doc = etree.parse(xsd_path)
+        schema = etree.XMLSchema(schema_doc)
+        xml_doc = etree.fromstring(xml_content.encode("utf-8"))
+        valid = schema.validate(xml_doc)
+        if valid:
+            return {
+                "status": "ok",
+                "summary": "XML válido no XSD oficial.",
+                "errors": [],
+            }
+        errors = [str(err.message) for err in schema.error_log][:5]
+        return {
+            "status": "danger",
+            "summary": "XML inválido no XSD oficial.",
+            "errors": errors,
+        }
+    except Exception as e:
+        return {
+            "status": "danger",
+            "summary": "Falha técnica na validação XSD.",
+            "errors": [str(e)],
+        }
+
+
+def _esocial_xml_s1000(company: Company) -> str:
+    cnpj = xml_escape(company.cnpj or "")
+    classtrib = xml_escape(company.esocial_classification or "")
+    ind_porte = "S" if (company.company_size or "") in {"micro", "small"} else ""
+    ini_valid = datetime.utcnow().strftime("%Y-%m")
+    event_id = _esocial_event_id()
+
+    ind_porte_xml = f"        <indPorte>{ind_porte}</indPorte>\n" if ind_porte else ""
+    return (
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+        "<eSocial xmlns=\"http://www.esocial.gov.br/schema/evt/evtInfoEmpregador/v_S_01_03_00\" xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\">\n"
+        f"  <evtInfoEmpregador Id=\"{event_id}\">\n"
+        "    <ideEvento>\n"
+        "      <tpAmb>2</tpAmb>\n"
+        "      <procEmi>1</procEmi>\n"
+        "      <verProc>sistema-contabilidade-1.0</verProc>\n"
+        "    </ideEvento>\n"
+        "    <ideEmpregador>\n"
+        "      <tpInsc>1</tpInsc>\n"
+        f"      <nrInsc>{cnpj}</nrInsc>\n"
+        "    </ideEmpregador>\n"
+        "    <infoEmpregador>\n"
+        "      <inclusao>\n"
+        "        <idePeriodo>\n"
+        f"          <iniValid>{ini_valid}</iniValid>\n"
+        "        </idePeriodo>\n"
+        "        <infoCadastro>\n"
+        f"          <classTrib>{classtrib}</classTrib>\n"
+        f"          <indDesFolha>{1 if company.payroll_tax_relief else 0}</indDesFolha>\n"
+        f"          {ind_porte_xml}"
+        "          <indOptRegEletron>1</indOptRegEletron>\n"
+        "        </infoCadastro>\n"
+        "      </inclusao>\n"
+        "    </infoEmpregador>\n"
+        "  </evtInfoEmpregador>\n"
+        f"{_esocial_dummy_signature()}"
+        "</eSocial>\n"
+    )
+
+
+def _esocial_xml_s1005(company: Company) -> str:
+    cnpj_emp = xml_escape(company.cnpj or "")
+    cnpj_est = xml_escape((company.establishment_cnpj or company.cnpj or "")[:14])
+    cnae_est = xml_escape((_digits_only(company.establishment_cnae or company.cnae) or "")[:7])
+    ini_valid = datetime.utcnow().strftime("%Y-%m")
+    event_id = _esocial_event_id()
+    return (
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+        "<eSocial xmlns=\"http://www.esocial.gov.br/schema/evt/evtTabEstab/v_S_01_03_00\" xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\">\n"
+        f"  <evtTabEstab Id=\"{event_id}\">\n"
+        "    <ideEvento>\n"
+        "      <tpAmb>2</tpAmb>\n"
+        "      <procEmi>1</procEmi>\n"
+        "      <verProc>sistema-contabilidade-1.0</verProc>\n"
+        "    </ideEvento>\n"
+        "    <ideEmpregador>\n"
+        "      <tpInsc>1</tpInsc>\n"
+        f"      <nrInsc>{cnpj_emp}</nrInsc>\n"
+        "    </ideEmpregador>\n"
+        "    <infoEstab>\n"
+        "      <inclusao>\n"
+        "        <ideEstab>\n"
+        "          <tpInsc>1</tpInsc>\n"
+        f"          <nrInsc>{cnpj_est}</nrInsc>\n"
+        f"          <iniValid>{ini_valid}</iniValid>\n"
+        "        </ideEstab>\n"
+        "        <dadosEstab>\n"
+        f"          <cnaePrep>{cnae_est}</cnaePrep>\n"
+        "        </dadosEstab>\n"
+        "      </inclusao>\n"
+        "    </infoEstab>\n"
+        "  </evtTabEstab>\n"
+        f"{_esocial_dummy_signature()}"
+        "</eSocial>\n"
+    )
+
+
+def _save_esocial_xml(event_type: str, xml_content: str) -> str:
+    stamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    filename = f"esocial_{event_type.lower()}_{stamp}.xml"
+    path = os.path.join(_media_esocial_dir(), filename)
+    with open(path, "w", encoding="utf-8") as fp:
+        fp.write(xml_content)
+    return filename
+
+
+@payroll_bp.get("/company")
+@login_required
+def company_profile():
+    company = _company_row()
+    readiness = _company_official_readiness(company)
+    return render_template("payroll/company_profile.html", company=company, readiness=readiness)
+
+
+@payroll_bp.post("/company")
+@login_required
+def company_profile_save():
+    company = _company_row()
+    payload = {
+        "legal_name": (request.form.get("legal_name") or "").strip(),
+        "trade_name": (request.form.get("trade_name") or "").strip(),
+        "cnpj": _digits_only(request.form.get("cnpj")) or "",
+        "cnae": _digits_only(request.form.get("cnae")) or (request.form.get("cnae") or "").strip(),
+        "tax_regime": (request.form.get("tax_regime") or "").strip(),
+        "esocial_classification": (request.form.get("esocial_classification") or "").strip(),
+        "company_size": (request.form.get("company_size") or "").strip(),
+        "payroll_tax_relief": (request.form.get("payroll_tax_relief") or "0") == "1",
+        "state_registration": (request.form.get("state_registration") or "").strip() or None,
+        "municipal_registration": (request.form.get("municipal_registration") or "").strip() or None,
+        "city": (request.form.get("city") or "").strip(),
+        "state": (request.form.get("state") or "").strip().upper(),
+        "responsible_name": (request.form.get("responsible_name") or "").strip(),
+        "responsible_cpf": _digits_only(request.form.get("responsible_cpf")) or "",
+        "responsible_email": (request.form.get("responsible_email") or "").strip(),
+        "responsible_phone": (request.form.get("responsible_phone") or "").strip() or None,
+        "establishment_cnpj": _digits_only(request.form.get("establishment_cnpj")) or None,
+        "establishment_cnae": _digits_only(request.form.get("establishment_cnae")) or (request.form.get("establishment_cnae") or "").strip() or None,
+    }
+    errors = _validate_company_official_minimum(payload)
+    if errors:
+        for msg in errors:
+            flash(msg, "warning")
+        return redirect(url_for("payroll.company_profile"))
+
+    for key, val in payload.items():
+        setattr(company, key, val)
+    now = datetime.utcnow()
+    _add_evidence_event(
+        year=now.year,
+        month=now.month,
+        event_type="company_profile_updated",
+        details="Cadastro oficial mínimo da empresa atualizado",
+    )
+    db.session.commit()
+    flash("Cadastro oficial mínimo da empresa salvo com sucesso.", "success")
+    return redirect(url_for("payroll.company_profile"))
+
+
+@payroll_bp.get("/esocial/assisted")
+@login_required
+def esocial_assisted_home():
+    company = _company_row()
+    readiness = _company_official_readiness(company)
+    schema_readiness = _esocial_schema_readiness()
+    submissions = EsocialSubmission.query.order_by(EsocialSubmission.created_at.desc()).limit(30).all()
+    return render_template(
+        "payroll/esocial_assisted.html",
+        company=company,
+        readiness=readiness,
+        schema_readiness=schema_readiness,
+        submissions=submissions,
+    )
+
+
+@payroll_bp.post("/esocial/assisted/generate")
+@login_required
+def esocial_assisted_generate():
+    event_type = (request.form.get("event_type") or "").strip().upper()
+    if event_type not in {"S-1000", "S-1005"}:
+        flash("Evento inválido para geração assistida.", "warning")
+        return redirect(url_for("payroll.esocial_assisted_home"))
+
+    schema_readiness = _esocial_schema_readiness()
+    if not schema_readiness.get("ok"):
+        flash("Schemas XSD oficiais não encontrados no sistema. Reinstale os esquemas antes de gerar XML.", "warning")
+        return redirect(url_for("payroll.esocial_assisted_home"))
+
+    company = _company_row()
+    readiness = _company_official_readiness(company)
+    if not readiness.get("ok"):
+        flash("Cadastro oficial da empresa incompleto. Complete os campos obrigatórios antes de gerar XML.", "warning")
+        return redirect(url_for("payroll.company_profile"))
+
+    xml = _esocial_xml_s1000(company) if event_type == "S-1000" else _esocial_xml_s1005(company)
+    xsd_validation = _validate_esocial_xml_xsd(event_type=event_type, xml_content=xml)
+    xml_filename = _save_esocial_xml(event_type=event_type, xml_content=xml)
+    sub = EsocialSubmission(
+        event_type=event_type,
+        status=("generated" if xsd_validation.get("status") == "ok" else "error"),
+        xml_filename=xml_filename,
+        xsd_validation_status=xsd_validation.get("status") or "pending",
+        xsd_validation_summary="; ".join(xsd_validation.get("errors") or [])[:500] if xsd_validation.get("errors") else xsd_validation.get("summary"),
+        actor_email=getattr(current_user, "email", None),
+        notes="Gerado em modo assistido para envio manual no portal oficial.",
+    )
+    db.session.add(sub)
+    now = datetime.utcnow()
+    _add_evidence_event(
+        year=now.year,
+        month=now.month,
+        event_type="esocial_xml_generated",
+        entity_type="guide",
+        entity_key=event_type,
+        details=f"xml={xml_filename} xsd={xsd_validation.get('status')}",
+    )
+    db.session.commit()
+    if xsd_validation.get("status") == "ok":
+        flash(f"XML {event_type} gerado e validado no XSD oficial. Faça o envio manual no ambiente oficial do eSocial.", "success")
+    else:
+        flash(f"XML {event_type} gerado, mas com alerta de validação XSD: {xsd_validation.get('summary')}", "warning")
+    return redirect(url_for("payroll.esocial_assisted_home"))
+
+
+@payroll_bp.post("/esocial/assisted/<int:submission_id>/mark-sent")
+@login_required
+def esocial_assisted_mark_sent(submission_id: int):
+    sub = EsocialSubmission.query.get_or_404(submission_id)
+    protocol = (request.form.get("protocol") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+    if not protocol:
+        flash("Informe o protocolo oficial para marcar como enviado.", "warning")
+        return redirect(url_for("payroll.esocial_assisted_home"))
+    sub.status = "sent"
+    sub.protocol = protocol
+    sub.notes = notes or sub.notes
+    sub.sent_at = datetime.utcnow()
+    sub.actor_email = getattr(current_user, "email", None)
+    _add_evidence_event(
+        year=int((sub.sent_at or datetime.utcnow()).year),
+        month=int((sub.sent_at or datetime.utcnow()).month),
+        event_type="esocial_manual_sent",
+        entity_type="guide",
+        entity_key=sub.event_type,
+        details=f"protocol={protocol}",
+    )
+    db.session.commit()
+    flash("Envio manual registrado com sucesso (trilha de evidência).", "success")
+    return redirect(url_for("payroll.esocial_assisted_home"))
 
 
 def _competence_start(year: int, month: int) -> date:

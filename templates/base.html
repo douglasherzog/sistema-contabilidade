@@ -14,6 +14,8 @@
         {% if current_user.is_authenticated %}
         <div class="navbar-nav">
           <a class="nav-link" href="{{ url_for('payroll.monthly_guide') }}">Modo Guiado</a>
+          <a class="nav-link" href="{{ url_for('payroll.company_profile') }}">Empresa oficial</a>
+          <a class="nav-link" href="{{ url_for('payroll.esocial_assisted_home') }}">eSocial assistido</a>
           <a class="nav-link" href="{{ url_for('payroll.employees') }}">Funcionários</a>
           <a class="nav-link" href="{{ url_for('payroll.payroll_home') }}">Folha</a>
           <a class="nav-link" href="{{ url_for('payroll.revenue_home') }}">Receitas</a>

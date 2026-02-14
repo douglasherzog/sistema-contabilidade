@@ -106,6 +106,21 @@ def _gen_valid_cpf() -> str:
     return "".join(str(n) for n in (base + [d1, d2]))
 
 
+def _gen_valid_cnpj() -> str:
+    base = [random.randint(0, 9) for _ in range(12)]
+    if len(set(base)) == 1:
+        base[0] = (base[0] + 1) % 10
+
+    def _digit(nums: list[int], weights: list[int]) -> int:
+        total = sum(nums[i] * weights[i] for i in range(len(weights)))
+        mod = total % 11
+        return 0 if mod < 2 else 11 - mod
+
+    d1 = _digit(base, [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+    d2 = _digit(base + [d1], [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+    return "".join(str(n) for n in (base + [d1, d2]))
+
+
 def main() -> int:
     jar = CookieJar()
     opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
@@ -138,6 +153,64 @@ def main() -> int:
         raise RuntimeError("Home page missing executive weekly summary panel")
     if "Monitor de mudanças legais/fiscais" not in home_page:
         raise RuntimeError("Home page missing legal/fiscal monitor panel")
+
+    print("[2.05] Validate company official profile + assisted eSocial")
+    cnpj_company = _gen_valid_cnpj()
+    cnpj_est = _gen_valid_cnpj()
+    if cnpj_est == cnpj_company:
+        cnpj_est = _gen_valid_cnpj()
+    cpf_resp = _gen_valid_cpf()
+
+    _request(
+        opener,
+        "POST",
+        "/payroll/company",
+        {
+            "legal_name": "Empresa Smoke LTDA",
+            "trade_name": "Empresa Smoke",
+            "cnpj": cnpj_company,
+            "cnae": "6201501",
+            "tax_regime": "simples",
+            "esocial_classification": "01",
+            "company_size": "small",
+            "payroll_tax_relief": "0",
+            "state_registration": "",
+            "municipal_registration": "",
+            "city": "Porto Alegre",
+            "state": "RS",
+            "responsible_name": "Responsável Smoke",
+            "responsible_cpf": cpf_resp,
+            "responsible_email": "responsavel.smoke@example.com",
+            "responsible_phone": "51999999999",
+            "establishment_cnpj": cnpj_est,
+            "establishment_cnae": "6201501",
+        },
+    )
+
+    company_page = _request(opener, "GET", "/payroll/company").read().decode("utf-8", errors="replace")
+    if "Cadastro pronto para modo assistido" not in company_page:
+        raise RuntimeError("Company official profile did not become ready after save")
+
+    _request(opener, "POST", "/payroll/esocial/assisted/generate", {"event_type": "S-1000"})
+    esocial_page = _request(opener, "GET", "/payroll/esocial/assisted").read().decode("utf-8", errors="replace")
+    if "eSocial assistido (S-1000 / S-1005)" not in esocial_page:
+        raise RuntimeError("eSocial assisted page missing main title")
+    if "esocial_s-1000_" not in esocial_page or "/media/esocial/" not in esocial_page:
+        raise RuntimeError("S-1000 XML generation did not appear in assisted eSocial list")
+
+    ms = re.search(r"/payroll/esocial/assisted/(\d+)/mark-sent", esocial_page)
+    if not ms:
+        raise RuntimeError("Could not parse assisted eSocial submission id for mark-sent")
+    submission_id = int(ms.group(1))
+    _request(
+        opener,
+        "POST",
+        f"/payroll/esocial/assisted/{submission_id}/mark-sent",
+        {"protocol": "PROTOCOLO-SMOKE-001", "notes": "Envio manual validado no smoke"},
+    )
+    esocial_page_after = _request(opener, "GET", "/payroll/esocial/assisted").read().decode("utf-8", errors="replace")
+    if "Enviado (manual)" not in esocial_page_after:
+        raise RuntimeError("eSocial assisted submission was not marked as sent")
 
     # Optional: validate tax sync routine (requires docker + network)
     if os.environ.get("SMOKE_SKIP_DOCKER_SYNC") not in ("1", "true", "yes"):

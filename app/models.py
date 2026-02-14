@@ -36,8 +36,20 @@ class Company(db.Model):
     trade_name = db.Column(db.String(255), nullable=False, default="")
     cnpj = db.Column(db.String(30), nullable=False, default="")
     cnae = db.Column(db.String(20), nullable=False, default="")
+    tax_regime = db.Column(db.String(20), nullable=False, default="")  # simples | presumido | real
+    esocial_classification = db.Column(db.String(10), nullable=False, default="")  # classTrib
+    company_size = db.Column(db.String(20), nullable=False, default="")  # indPorte
+    payroll_tax_relief = db.Column(db.Boolean, nullable=False, default=False)  # indDesFolha
+    state_registration = db.Column(db.String(30), nullable=True)
+    municipal_registration = db.Column(db.String(30), nullable=True)
     city = db.Column(db.String(120), nullable=False, default="")
     state = db.Column(db.String(2), nullable=False, default="RS")
+    responsible_name = db.Column(db.String(255), nullable=False, default="")
+    responsible_cpf = db.Column(db.String(20), nullable=False, default="")
+    responsible_email = db.Column(db.String(255), nullable=False, default="")
+    responsible_phone = db.Column(db.String(30), nullable=True)
+    establishment_cnpj = db.Column(db.String(30), nullable=True)
+    establishment_cnae = db.Column(db.String(20), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -141,6 +153,20 @@ class ComplianceEvidenceEvent(db.Model):
     entity_key = db.Column(db.String(80), nullable=True)
     actor_email = db.Column(db.String(255), nullable=True)
     details = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class EsocialSubmission(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    event_type = db.Column(db.String(20), nullable=False, index=True)  # S-1000 | S-1005
+    status = db.Column(db.String(20), nullable=False, default="generated")  # generated | sent | error
+    xml_filename = db.Column(db.String(255), nullable=False)
+    xsd_validation_status = db.Column(db.String(20), nullable=False, default="pending")  # ok | warning | danger | pending
+    xsd_validation_summary = db.Column(db.String(500), nullable=True)
+    protocol = db.Column(db.String(120), nullable=True)
+    sent_at = db.Column(db.DateTime, nullable=True)
+    actor_email = db.Column(db.String(255), nullable=True)
+    notes = db.Column(db.String(500), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
 

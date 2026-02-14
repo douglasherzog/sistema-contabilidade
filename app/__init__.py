@@ -67,10 +67,23 @@ def create_app() -> Flask:
 
     media_guides_dir = os.path.join(app.instance_path, "media", "guides")
     os.makedirs(media_guides_dir, exist_ok=True)
+    media_esocial_dir = os.path.join(app.instance_path, "media", "esocial")
+    os.makedirs(media_esocial_dir, exist_ok=True)
 
     @app.route("/media/guides/<path:filename>")
     def media_guides(filename: str):
         resp = send_from_directory(media_guides_dir, filename)
+        try:
+            resp.headers["Cache-Control"] = "no-store, max-age=0"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers["Expires"] = "0"
+        except Exception:
+            pass
+        return resp
+
+    @app.route("/media/esocial/<path:filename>")
+    def media_esocial(filename: str):
+        resp = send_from_directory(media_esocial_dir, filename)
         try:
             resp.headers["Cache-Control"] = "no-store, max-age=0"
             resp.headers["Pragma"] = "no-cache"

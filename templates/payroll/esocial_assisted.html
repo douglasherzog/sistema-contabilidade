@@ -1,0 +1,155 @@
+{% extends 'base.html' %}
+{% block title %}eSocial assistido - Sistema Contabilidade{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1 class="h4 mb-1">eSocial assistido (S-1000 / S-1005)</h1>
+    <div class="small text-muted">Geração didática de XML para envio manual no ambiente oficial, com trilha de protocolo.</div>
+  </div>
+  <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('payroll.help_page', slug='empresa_oficial') }}">Ajuda desta tela</a>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Pré-condição obrigatória</h2>
+      <div class="lav-meta">Cadastro oficial mínimo da empresa precisa estar completo para gerar XML.</div>
+    </div>
+
+    {% if readiness.ok %}
+      <div class="lav-callout is-success mb-2">
+        <strong>Cadastro apto.</strong>
+        <div class="small">Você pode gerar S-1000 e S-1005 em modo assistido.</div>
+      </div>
+    {% else %}
+      <div class="lav-callout is-warning mb-2">
+        <strong>Cadastro incompleto.</strong>
+        <div class="small">Faltam {{ readiness.missing_count }} item(ns):</div>
+        <div class="small">
+          {% for m in readiness.missing %}
+            <div>• {{ m }}</div>
+          {% endfor %}
+        </div>
+      </div>
+      <a class="btn btn-sm btn-outline-primary" href="{{ url_for('payroll.company_profile') }}">Completar cadastro oficial</a>
+    {% endif %}
+
+    {% if schema_readiness %}
+      <hr>
+      <div class="small text-muted mb-1">Schemas XSD oficiais:</div>
+      <div class="small">
+        {% for row in schema_readiness.checks %}
+          <div>
+            {% if row.ok %}
+              <span class="badge text-bg-success">OK</span>
+            {% else %}
+              <span class="badge text-bg-danger">Ausente</span>
+            {% endif %}
+            {{ row.event_type }}
+          </div>
+        {% endfor %}
+      </div>
+      {% if not schema_readiness.ok %}
+        <div class="small text-warning">Schemas não encontrados. Validação XSD não estará disponível.</div>
+      {% endif %}
+    {% endif %}
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Geração assistida de XML</h2>
+      <div class="lav-meta">Fluxo recomendado: gerar, validar no portal e registrar protocolo oficial</div>
+    </div>
+
+    <div class="row g-2">
+      <div class="col-md-6">
+        <form method="post" action="{{ url_for('payroll.esocial_assisted_generate') }}">
+          <input type="hidden" name="event_type" value="S-1000">
+          <button class="btn btn-primary w-100" type="submit" {% if not readiness.ok %}disabled{% endif %}>Gerar XML S-1000 (Empregador)</button>
+        </form>
+      </div>
+      <div class="col-md-6">
+        <form method="post" action="{{ url_for('payroll.esocial_assisted_generate') }}">
+          <input type="hidden" name="event_type" value="S-1005">
+          <button class="btn btn-outline-primary w-100" type="submit" {% if not readiness.ok %}disabled{% endif %}>Gerar XML S-1005 (Estabelecimento)</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Histórico de envios assistidos</h2>
+      <div class="lav-meta">Registre o protocolo após envio manual para manter evidência operacional</div>
+    </div>
+
+    {% if submissions %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Evento</th>
+              <th>Status</th>
+              <th>XSD</th>
+              <th>Arquivo XML</th>
+              <th>Criado em</th>
+              <th>Protocolo</th>
+              <th class="lav-th-fit"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in submissions %}
+            <tr>
+              <td><strong>{{ s.event_type }}</strong></td>
+              <td>
+                {% if s.status == 'sent' %}
+                  <span class="badge text-bg-success">Enviado (manual)</span>
+                {% elif s.status == 'error' %}
+                  <span class="badge text-bg-danger">Erro</span>
+                {% else %}
+                  <span class="badge text-bg-warning">Gerado</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if s.xsd_validation_status == 'ok' %}
+                  <span class="badge text-bg-success">XSD OK</span>
+                {% elif s.xsd_validation_status == 'danger' %}
+                  <span class="badge text-bg-danger">XSD inválido</span>
+                {% elif s.xsd_validation_status == 'warning' %}
+                  <span class="badge text-bg-warning">XSD aviso</span>
+                {% else %}
+                  <span class="badge text-bg-secondary">XSD pendente</span>
+                {% endif %}
+                {% if s.xsd_validation_summary %}
+                  <div class="small text-muted">{{ s.xsd_validation_summary[:80] }}{% if s.xsd_validation_summary|length > 80 %}...{% endif %}</div>
+                {% endif %}
+              </td>
+              <td><a target="_blank" href="/media/esocial/{{ s.xml_filename }}">{{ s.xml_filename }}</a></td>
+              <td class="small text-muted">{{ s.created_at|fmt_dt }}</td>
+              <td class="small text-muted">{{ s.protocol or '-' }}</td>
+              <td>
+                {% if s.status != 'sent' %}
+                <form method="post" action="{{ url_for('payroll.esocial_assisted_mark_sent', submission_id=s.id) }}" class="d-flex gap-2">
+                  <input class="form-control form-control-sm" name="protocol" placeholder="Protocolo oficial" required>
+                  <input class="form-control form-control-sm" name="notes" placeholder="Observação (opcional)">
+                  <button class="btn btn-sm btn-outline-success" type="submit">Marcar enviado</button>
+                </form>
+                {% else %}
+                  <span class="small text-muted">Enviado em {{ s.sent_at|fmt_dt }} por {{ s.actor_email or '-' }}</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="small text-muted">Ainda não há XMLs gerados para eSocial assistido.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
