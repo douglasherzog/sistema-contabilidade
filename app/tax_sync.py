@@ -1,6 +1,6 @@
 import io
 import re
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import click
@@ -10,13 +10,20 @@ import pdfplumber
 from flask import Flask
 
 from .extensions import db
-from .models import TaxInssBracket, TaxIrrfBracket, TaxIrrfConfig
+from .models import EmployeeThirteenth, EmployeeVacation, TaxInssBracket, TaxIrrfBracket, TaxIrrfConfig
 
 
 INSS_URL = "https://www.gov.br/inss/pt-br/direitos-e-deveres/inscricao-e-contribuicao/tabela-de-contribuicao-mensal"
-IRRF_URL = "https://www.gov.br/receitafederal/pt-br/assuntos/meu-imposto-de-renda/tabelas/2026"
-INSS_PDF_URL = "https://www.gov.br/previdencia/pt-br/assuntos/rpps/documentos/PortariaInterministerialMPSMF13de9dejaneirode2026.pdf"
-INSS_NEWS_URL = "https://www.gov.br/inss/pt-br/assuntos/com-reajuste-de-3-9-teto-do-inss-chega-a-r-8-475-55-em-2026"
+IRRF_URL_TEMPLATE = "https://www.gov.br/receitafederal/pt-br/assuntos/meu-imposto-de-renda/tabelas/{year}"
+
+# Fallback sources are year-specific and may change URL slug every year.
+# Keep known official URLs here. HTML parsing is the primary path.
+INSS_PDF_URLS: dict[int, str] = {
+    2026: "https://www.gov.br/previdencia/pt-br/assuntos/rpps/documentos/PortariaInterministerialMPSMF13de9dejaneirode2026.pdf",
+}
+INSS_NEWS_URLS: dict[int, str] = {
+    2026: "https://www.gov.br/inss/pt-br/assuntos/com-reajuste-de-3-9-teto-do-inss-chega-a-r-8-475-55-em-2026",
+}
 
 
 def _to_decimal_ptbr(s: str) -> Decimal:
@@ -33,8 +40,8 @@ def _extract_money_values(text: str) -> list[Decimal]:
     return vals
 
 
-def fetch_inss_employee_brackets() -> tuple[date, list[tuple[Decimal | None, Decimal]]]:
-    effective_from = date(2026, 1, 1)
+def fetch_inss_employee_brackets(year: int) -> tuple[date, list[tuple[Decimal | None, Decimal]]]:
+    effective_from = date(int(year), 1, 1)
 
     # First attempt: HTML table
     r = requests.get(INSS_URL, timeout=30)
@@ -100,9 +107,9 @@ def fetch_inss_employee_brackets() -> tuple[date, list[tuple[Decimal | None, Dec
     return effective_from, rows
 
 
-def fetch_inss_employee_brackets_from_pdf() -> tuple[date, list[tuple[Decimal | None, Decimal]]]:
-    effective_from = date(2026, 1, 1)
-    r = requests.get(INSS_PDF_URL, timeout=60)
+def fetch_inss_employee_brackets_from_pdf(year: int, pdf_url: str) -> tuple[date, list[tuple[Decimal | None, Decimal]]]:
+    effective_from = date(int(year), 1, 1)
+    r = requests.get(pdf_url, timeout=60)
     r.raise_for_status()
 
     rows: list[tuple[Decimal | None, Decimal]] = []
@@ -137,7 +144,7 @@ def fetch_inss_employee_brackets_from_pdf() -> tuple[date, list[tuple[Decimal | 
     return effective_from, cleaned
 
 
-def fetch_inss_employee_brackets_from_news() -> tuple[date, list[tuple[Decimal | None, Decimal]]]:
+def fetch_inss_employee_brackets_from_news(year: int, news_url: str) -> tuple[date, list[tuple[Decimal | None, Decimal]]]:
     """Fallback mais robusto: notícia oficial do INSS costuma trazer as faixas e alíquotas em texto.
 
     Exemplo (jan/2026):
@@ -147,8 +154,8 @@ def fetch_inss_employee_brackets_from_news() -> tuple[date, list[tuple[Decimal |
     • 14% para quem ganha de R$ 4.354,28 até R$ 8.475,55.
     """
 
-    effective_from = date(2026, 1, 1)
-    r = requests.get(INSS_NEWS_URL, timeout=30)
+    effective_from = date(int(year), 1, 1)
+    r = requests.get(news_url, timeout=30)
     r.raise_for_status()
 
     # Keep punctuation so we can parse decimals.
@@ -191,12 +198,13 @@ def fetch_inss_employee_brackets_from_news() -> tuple[date, list[tuple[Decimal |
     return effective_from, cleaned
 
 
-def fetch_irrf_monthly_table() -> tuple[date, Decimal, list[tuple[Decimal | None, Decimal, Decimal]]]:
-    r = requests.get(IRRF_URL, timeout=30)
+def fetch_irrf_monthly_table(year: int) -> tuple[date, Decimal, list[tuple[Decimal | None, Decimal, Decimal]], str]:
+    irrf_url = IRRF_URL_TEMPLATE.format(year=int(year))
+    r = requests.get(irrf_url, timeout=30)
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "lxml")
 
-    effective_from = date(2026, 1, 1)
+    effective_from = date(int(year), 1, 1)
 
     txt = soup.get_text(" ", strip=True)
     mdep = re.search(r"Dedu[cç]ão mensal por dependente:\s*R\$\s*([0-9\.]+,[0-9]{2})", txt)
@@ -256,18 +264,23 @@ def fetch_irrf_monthly_table() -> tuple[date, Decimal, list[tuple[Decimal | None
             f"Extração IRRF retornou poucas faixas ({len(rows)}). Abortando para evitar gravar dados incompletos."
         )
 
-    return effective_from, dep_ded, rows
+    return effective_from, dep_ded, rows, irrf_url
 
 
 def register_commands(app: Flask) -> None:
     @app.cli.command("sync-taxes")
     @click.option("--apply", "apply_changes", is_flag=True)
-    def sync_taxes(apply_changes: bool) -> None:
+    @click.option("--year", "target_year", type=int, default=date.today().year, show_default=True)
+    def sync_taxes(apply_changes: bool, target_year: int) -> None:
+        if target_year < 2000 or target_year > 9999:
+            raise click.ClickException("Ano inválido para sync-taxes.")
+
         inss_eff = None
         inss_rows: list[tuple[Decimal | None, Decimal]] = []
         irrf_eff = None
         dep_ded = None
         irrf_rows: list[tuple[Decimal | None, Decimal, Decimal]] = []
+        irrf_url = IRRF_URL_TEMPLATE.format(year=int(target_year))
 
         inss_source = None
         irrf_source = None
@@ -276,34 +289,53 @@ def register_commands(app: Flask) -> None:
         irrf_error = None
 
         try:
-            inss_eff, inss_rows = fetch_inss_employee_brackets()
+            inss_eff, inss_rows = fetch_inss_employee_brackets(target_year)
             if len(inss_rows) < 3:
                 raise RuntimeError(f"Extração INSS retornou poucas faixas ({len(inss_rows)}).")
             inss_source = "html"
         except Exception as e:
             inss_error = str(e)
-            try:
-                inss_eff, inss_rows = fetch_inss_employee_brackets_from_news()
-                inss_source = "news"
-            except Exception as e2:
+            news_url = INSS_NEWS_URLS.get(int(target_year))
+            pdf_url = INSS_PDF_URLS.get(int(target_year))
+            e2 = None
+            e3 = None
+            if news_url:
                 try:
-                    inss_eff, inss_rows = fetch_inss_employee_brackets_from_pdf()
+                    inss_eff, inss_rows = fetch_inss_employee_brackets_from_news(target_year, news_url)
+                    inss_source = "news"
+                except Exception as ex_news:
+                    e2 = ex_news
+            if (not inss_rows) and pdf_url:
+                try:
+                    inss_eff, inss_rows = fetch_inss_employee_brackets_from_pdf(target_year, pdf_url)
                     inss_source = "pdf"
-                except Exception as e3:
-                    inss_error = f"{inss_error} | Fallback notícia falhou: {e2} | Fallback PDF falhou: {e3}"
+                except Exception as ex_pdf:
+                    e3 = ex_pdf
+            if not inss_rows:
+                notes = []
+                if e2 is not None:
+                    notes.append(f"Fallback notícia falhou: {e2}")
+                if e3 is not None:
+                    notes.append(f"Fallback PDF falhou: {e3}")
+                if not news_url:
+                    notes.append("Sem URL de notícia mapeada para este ano")
+                if not pdf_url:
+                    notes.append("Sem URL de portaria PDF mapeada para este ano")
+                inss_error = f"{inss_error} | {' | '.join(notes)}"
 
         try:
-            irrf_eff, dep_ded, irrf_rows = fetch_irrf_monthly_table()
+            irrf_eff, dep_ded, irrf_rows, irrf_url = fetch_irrf_monthly_table(target_year)
             irrf_source = "html"
         except Exception as e:
             irrf_error = str(e)
 
         click.echo("INSS (empregado):")
+        click.echo(f"Ano alvo: {target_year}")
         if inss_source:
             click.echo(f"Fonte utilizada: {inss_source}")
         click.echo(f"Fonte HTML: {INSS_URL}")
-        click.echo(f"Fonte notícia (INSS): {INSS_NEWS_URL}")
-        click.echo(f"Fonte PDF (Portaria): {INSS_PDF_URL}")
+        click.echo(f"Fonte notícia (INSS): {INSS_NEWS_URLS.get(int(target_year), 'não mapeada')}")
+        click.echo(f"Fonte PDF (Portaria): {INSS_PDF_URLS.get(int(target_year), 'não mapeada')}")
         if inss_rows and inss_eff:
             click.echo(f"Vigência sugerida: {inss_eff.isoformat()}")
             for up_to, rate in inss_rows:
@@ -315,7 +347,7 @@ def register_commands(app: Flask) -> None:
         click.echo("IRRF (mensal):")
         if irrf_source:
             click.echo(f"Fonte utilizada: {irrf_source}")
-        click.echo(IRRF_URL)
+        click.echo(irrf_url)
         if irrf_rows and irrf_eff and dep_ded is not None:
             click.echo(f"Vigência sugerida: {irrf_eff.isoformat()}")
             click.echo(f"Dedução por dependente: {dep_ded}")
@@ -349,3 +381,84 @@ def register_commands(app: Flask) -> None:
 
         db.session.commit()
         click.echo("OK: tabelas gravadas no banco.")
+
+    @app.cli.command("compliance-check")
+    @click.option("--year", "target_year", type=int, default=date.today().year, show_default=True)
+    @click.option("--apply-tax-sync", is_flag=True, help="Atualiza tabelas INSS/IRRF automaticamente se houver divergência.")
+    def compliance_check(target_year: int, apply_tax_sync: bool) -> None:
+        """Verifica conformidade legal mínima (CLT + tabelas fiscais oficiais)."""
+        if target_year < 2000 or target_year > 9999:
+            raise click.ClickException("Ano inválido para compliance-check.")
+
+        issues: list[str] = []
+        infos: list[str] = []
+
+        # 1) Tabelas fiscais oficiais (INSS/IRRF)
+        expected_eff = date(int(target_year), 1, 1)
+        db_inss_count = TaxInssBracket.query.filter_by(effective_from=expected_eff).count()
+        db_irrf_count = TaxIrrfBracket.query.filter_by(effective_from=expected_eff).count()
+        db_irrf_cfg = TaxIrrfConfig.query.filter_by(effective_from=expected_eff).first()
+
+        need_tax_sync = db_inss_count < 3 or db_irrf_count < 3 or db_irrf_cfg is None
+        if need_tax_sync:
+            if apply_tax_sync:
+                # Reuse extraction and apply logic
+                click.echo("Aplicando sync-taxes automático...")
+                ctx = click.get_current_context()
+                ctx.invoke(sync_taxes, apply_changes=True, target_year=target_year)
+                # Re-check after applying
+                db_inss_count = TaxInssBracket.query.filter_by(effective_from=expected_eff).count()
+                db_irrf_count = TaxIrrfBracket.query.filter_by(effective_from=expected_eff).count()
+                db_irrf_cfg = TaxIrrfConfig.query.filter_by(effective_from=expected_eff).first()
+                if db_inss_count >= 3 and db_irrf_count >= 3 and db_irrf_cfg is not None:
+                    infos.append("sync-taxes aplicado automaticamente e tabelas atualizadas.")
+                else:
+                    issues.append(
+                        f"Tabelas fiscais continuam incompletas após sync para {target_year}: INSS={db_inss_count} faixas, IRRF={db_irrf_count} faixas, cfg={'ok' if db_irrf_cfg else 'ausente'}."
+                    )
+            else:
+                issues.append(
+                    f"Tabelas fiscais incompletas para {target_year}: INSS={db_inss_count} faixas, IRRF={db_irrf_count} faixas, cfg={'ok' if db_irrf_cfg else 'ausente'}."
+                )
+        else:
+            infos.append(f"Tabelas INSS/IRRF para {target_year} parecem completas.")
+
+        # 2) CLT - 13º prazos
+        nov_30 = date(int(target_year), 11, 30)
+        dec_20 = date(int(target_year), 12, 20)
+
+        first_installments = EmployeeThirteenth.query.filter_by(reference_year=target_year, payment_type="1st_installment").all()
+        for r in first_installments:
+            if int(r.payment_month) != 11:
+                issues.append(f"13º 1ª parcela fora de novembro (id={r.id}, funcionário={r.employee_id}).")
+            if r.pay_date and r.pay_date > nov_30:
+                issues.append(f"13º 1ª parcela paga após 30/11 (id={r.id}, data={r.pay_date.isoformat()}).")
+
+        second_installments = EmployeeThirteenth.query.filter_by(reference_year=target_year, payment_type="2nd_installment").all()
+        for r in second_installments:
+            if int(r.payment_month) != 12:
+                issues.append(f"13º 2ª parcela fora de dezembro (id={r.id}, funcionário={r.employee_id}).")
+            if r.pay_date and r.pay_date > dec_20:
+                issues.append(f"13º 2ª parcela paga após 20/12 (id={r.id}, data={r.pay_date.isoformat()}).")
+
+        # 3) CLT - férias (pagamento até 2 dias antes do início)
+        vacations = EmployeeVacation.query.filter_by(year=target_year).all()
+        for v in vacations:
+            if v.pay_date and v.start_date and v.pay_date > (v.start_date - timedelta(days=2)):
+                issues.append(
+                    f"Férias com pagamento fora do prazo legal (id={v.id}, funcionário={v.employee_id}, início={v.start_date.isoformat()}, pagamento={v.pay_date.isoformat()})."
+                )
+
+        click.echo(f"Compliance check - ano {target_year}")
+        if infos:
+            click.echo("\nInformações:")
+            for i in infos:
+                click.echo(f" - {i}")
+
+        if issues:
+            click.echo("\nNão conformidades / alertas:")
+            for it in issues:
+                click.echo(f" - {it}")
+            raise click.ClickException(f"Foram encontrados {len(issues)} alerta(s) de conformidade.")
+
+        click.echo("\nOK: nenhuma não conformidade detectada nas regras verificadas.")
