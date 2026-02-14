@@ -212,6 +212,15 @@ def main() -> int:
     if "Enviado (manual)" not in esocial_page_after:
         raise RuntimeError("eSocial assisted submission was not marked as sent")
 
+    print("[2.06] Validate monthly guided mode includes company profile step 0")
+    guide_page = _request(opener, "GET", f"/payroll/guide?year={test_year}&month={test_month}").read().decode("utf-8", errors="replace")
+    if "0) Cadastro oficial da empresa" not in guide_page:
+        raise RuntimeError("Monthly guided mode missing step 0: company profile")
+    if "1) Base de funcionários" not in guide_page:
+        raise RuntimeError("Monthly guided mode missing step 1: employees")
+    if "company_profile" not in guide_page:
+        raise RuntimeError("Monthly guided mode missing company_profile step key")
+
     # Optional: validate tax sync routine (requires docker + network)
     if os.environ.get("SMOKE_SKIP_DOCKER_SYNC") not in ("1", "true", "yes"):
         print("[2.1] Validate sync-taxes dry-run (docker)")

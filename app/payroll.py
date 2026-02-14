@@ -270,7 +270,7 @@ def help_page(slug: str):
 
 
 def _guide_step_keys() -> set[str]:
-    return {"employees", "revenue", "payroll", "taxes", "guides", "close"}
+    return {"company_profile", "employees", "revenue", "payroll", "taxes", "guides", "close"}
 
 
 def _guide_session_key(year: int, month: int) -> str:
@@ -345,7 +345,18 @@ def monthly_guide():
     terminations_summary = _calc_terminations_month_summary(year, month)
     leaves_summary = _calc_leaves_month_summary(year, month)
 
+    company = _company_row()
+    company_readiness = _company_official_readiness(company)
+
     steps = [
+        {
+            "key": "company_profile",
+            "title": "0) Cadastro oficial da empresa",
+            "auto_done": company_readiness.get("ok", False),
+            "desc": "Configure CNPJ, classTrib, regime tributário e responsável legal antes de operar.",
+            "action_url": url_for("payroll.company_profile"),
+            "action_label": "Completar cadastro",
+        },
         {
             "key": "employees",
             "title": "1) Base de funcionários",
