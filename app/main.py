@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 
 from flask import Blueprint, render_template, request, url_for
 from flask_login import login_required, current_user
@@ -6,6 +7,7 @@ from flask_login import login_required, current_user
 from .extensions import db
 from .models import (
     CompetenceClose,
+    EmployeeVacation,
     GuideDocument,
     PayrollRun,
     RevenueNote,
@@ -71,6 +73,11 @@ def index():
         "fgts": GuideDocument.query.filter_by(year=year, month=month, doc_type="fgts").first(),
     }
 
+    # Vacations summary for the month
+    vac_rows = EmployeeVacation.query.filter_by(year=year, month=month).all()
+    vac_count = len(vac_rows)
+    vac_total = sum([Decimal(str(r.gross_total or 0)) for r in vac_rows], Decimal("0")).quantize(Decimal("0.01"))
+
     closed = CompetenceClose.query.filter_by(year=year, month=month).first()
 
     status = {
@@ -98,6 +105,12 @@ def index():
             "ok": all(bool(docs.get(k)) for k in ("darf", "das", "fgts")),
             "docs": docs,
             "action_url": url_for("payroll.close_home", year=year, month=month),
+        },
+        "vacations": {
+            "ok": True,  # Always OK since no vacations is valid state
+            "count": vac_count,
+            "total_gross": vac_total,
+            "action_url": url_for("payroll.employees"),
         },
         "close": {
             "ok": bool(closed),

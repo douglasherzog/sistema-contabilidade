@@ -141,6 +141,29 @@
           </div>
         </div>
       </div>
+
+      <div class="col-lg-6">
+        <div class="card h-100 lav-check-card {% if status.vacations.count > 0 %}is-ok{% else %}is-pending{% endif %}">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start">
+              <h3 class="h6 mb-1">Férias no mês</h3>
+              {% if status.vacations.count > 0 %}
+                <span class="badge text-bg-success">{{ status.vacations.count }}</span>
+              {% else %}
+                <span class="badge text-bg-secondary">0</span>
+              {% endif %}
+            </div>
+            <div class="small lav-subtitle mb-3">
+              {% if status.vacations.count > 0 %}
+                Total bruto: <strong>R$ {{ '%.2f'|format(status.vacations.total_gross or 0) }}</strong>
+              {% else %}
+                Nenhuma férias registrada para este mês.
+              {% endif %}
+            </div>
+            <a class="btn btn-sm btn-outline-primary" href="{{ status.vacations.action_url }}">Ver funcionários</a>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>

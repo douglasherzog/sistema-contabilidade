@@ -244,7 +244,56 @@ def main() -> int:
     if "INSS (estimado)" in hol and "não configurado" in hol:
         raise RuntimeError("Holerite still shows taxes as not configured")
 
-    print("[7.2] Register one revenue note")
+    print("[7.3] Register vacation and validate receipt")
+    _request(
+        opener,
+        "POST",
+        f"/payroll/employees/{deise_id}/vacations",
+        {
+            "year": str(test_year),
+            "month": str(test_month),
+            "start_date": f"{test_year}-{test_month:02d}-15",
+            "pay_date": f"{test_year}-{test_month:02d}-13",
+            "days": "15",
+            "sell_days": "5",
+        },
+    )
+    vac_page = _request(
+        opener,
+        "GET",
+        f"/payroll/employees/{deise_id}/vacations?year={test_year}&month={test_month}",
+    ).read().decode("utf-8", errors="replace")
+    if "Férias" not in vac_page:
+        raise RuntimeError("Vacations page title not found")
+    if "15" not in vac_page or "5" not in vac_page:
+        raise RuntimeError("Vacation days or sell_days not found in vacations page")
+    # Extract vacation id from the receipt link
+    vac_id_match = re.search(r"/vacations/(\d+)/receipt", vac_page)
+    if not vac_id_match:
+        raise RuntimeError("Could not find vacation receipt link")
+    vac_id = int(vac_id_match.group(1))
+    rec_page = _request(opener, "GET", f"/payroll/vacations/{vac_id}/receipt").read().decode("utf-8", errors="replace")
+    if "Recibo de férias" not in rec_page:
+        raise RuntimeError("Vacation receipt page title not found")
+    if "Deise" not in rec_page:
+        raise RuntimeError("Employee name not found in vacation receipt")
+    if "1/3 constitucional" not in rec_page:
+        raise RuntimeError("Vacation receipt missing 1/3 constitucional line")
+
+    print("[7.4] Validate vacations appear in closing summary")
+    close_page_vac = _request(
+        opener,
+        "GET",
+        f"/payroll/close?year={test_year}&month={test_month}",
+    ).read().decode("utf-8", errors="replace")
+    if "Férias no mês" not in close_page_vac:
+        raise RuntimeError("Close page missing vacations section")
+    # The template renders: <strong>1</strong> registro(s)
+    vac_count_re = re.search(r"<strong>\s*1\s*</strong>\s*registro", close_page_vac, re.IGNORECASE)
+    if not vac_count_re:
+        raise RuntimeError("Close page missing vacation count")
+
+    print("[7.5] Register one revenue note")
     _request(
         opener,
         "POST",

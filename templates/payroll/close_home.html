@@ -90,6 +90,12 @@
               </div>
             {% endif %}
 
+            {% if key == 'vacations' and item.meta and item.meta.count > 0 %}
+              <div class="lav-meta mb-3">
+                Registradas: {{ item.meta.count }} · Total bruto: R$ {{ '%.2f'|format(item.meta.total_gross or 0) }}
+              </div>
+            {% endif %}
+
             <a class="btn btn-sm btn-outline-primary" href="{{ item.action_url }}">{{ item.action_label }}</a>
           </div>
         </div>
@@ -142,6 +148,16 @@
           </div>
         </div>
       </div>
+
+      {% if vacations_summary and vacations_summary.count > 0 %}
+      <hr>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <div class="small text-muted">Férias no mês</div>
+          <div><strong>{{ vacations_summary.count }}</strong> registro(s) · Total bruto: <strong>R$ {{ '%.2f'|format(vacations_summary.total_gross or 0) }}</strong></div>
+        </div>
+      </div>
+      {% endif %}
 
       <hr>
 
