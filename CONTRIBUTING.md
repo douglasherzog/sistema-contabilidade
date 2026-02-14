@@ -51,7 +51,7 @@ Com Docker:
 
 ```bash
 docker compose up -d --build
-docker compose exec web flask db upgrade
+docker compose exec web_dev flask db upgrade
 python smoke_test.py
 ```
 
@@ -72,11 +72,18 @@ docker compose ps
 - Rodar sync de tabelas tributárias:
 
 ```bash
-docker compose exec web flask sync-taxes
+docker compose exec web_dev flask sync-taxes
 ```
 
 - Aplicar/gravar no banco:
 
 ```bash
-docker compose exec web flask sync-taxes --apply
+docker compose exec web_dev flask sync-taxes --apply
 ```
+
+## 4) Ambientes locais (isolamento obrigatório)
+
+- Produção local (base quente): `web` + `db` em `http://localhost:8008`
+- Desenvolvimento/testes: `web_dev` + `db_dev` em `http://localhost:8010`
+
+Regra: toda validação automatizada (smoke/compliance) deve rodar no ambiente `web_dev`.

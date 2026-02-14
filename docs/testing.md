@@ -6,7 +6,7 @@
 
 ```bash
 docker compose up -d --build
-docker compose exec web flask db upgrade
+docker compose exec web_dev flask db upgrade
 python smoke_test.py
 ```
 
@@ -18,8 +18,13 @@ SMOKE_SKIP_DOCKER_SYNC=1 python smoke_test.py
 
 ## Validação manual
 
-- `docker compose exec web flask sync-taxes`
-- `docker compose exec web flask sync-taxes --apply`
+- `docker compose exec web_dev flask sync-taxes`
+- `docker compose exec web_dev flask sync-taxes --apply`
+
+## Regra do projeto (obrigatória)
+
+- Smoke e validações automatizadas: **sempre no ambiente de testes** (`web_dev`/`db_dev`, porta `8010`).
+- Uso real diário: **sempre no ambiente de produção local** (`web`/`db`, porta `8008`).
 
 ## Observações
 

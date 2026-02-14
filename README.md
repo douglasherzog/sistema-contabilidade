@@ -9,23 +9,58 @@ Sistema de contabilidade para a lavanderia.
 
 ## Subir com Docker (recomendado)
 
-1. Subir:
-   
-   ```bash
-   docker compose up -d --build
-   ```
+Este projeto agora roda com **2 ambientes locais isolados**:
 
-2. Rodar migrations (primeira vez):
+- **Produção local (base quente):** `web` + `db` em `http://localhost:8008`
+- **Desenvolvimento/testes:** `web_dev` + `db_dev` em `http://localhost:8010`
 
-   ```bash
-   docker compose exec web flask db init
-   docker compose exec web flask db migrate -m "init"
-   docker compose exec web flask db upgrade
-   ```
+### 1) Subir os ambientes
 
-3. Acessar:
+```bash
+docker compose up -d --build
+```
 
-- http://localhost:8008
+### 2) Rodar migrations (primeira vez)
+
+Base quente (produção local):
+
+```bash
+docker compose exec web flask db upgrade
+```
+
+Base de desenvolvimento/testes:
+
+```bash
+docker compose exec web_dev flask db upgrade
+```
+
+### 3) Acessar
+
+- Produção local (uso real): http://localhost:8008
+- Desenvolvimento/testes: http://localhost:8010
+
+## Regra operacional (acordo do projeto)
+
+- **Uso diário real do sistema:** sempre em `web`/`db` (porta 8008).
+- **Smoke tests e validações automáticas:** sempre em `web_dev`/`db_dev` (porta 8010).
+
+Smoke (padrão já aponta para ambiente de testes):
+
+```bash
+python smoke_test.py
+```
+
+Opcional, explícito:
+
+```bash
+BASE_URL=http://localhost:8010 SMOKE_WEB_SERVICE=web_dev python smoke_test.py
+```
+
+---
+
+## Histórico (comandos antigos)
+
+Antes havia apenas um ambiente. Se você vir comandos antigos como `docker compose exec web ...` para smoke, troque para `web_dev`.
 
 ## Desenvolvimento (sem Docker)
 

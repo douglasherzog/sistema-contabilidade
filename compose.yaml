@@ -1,14 +1,15 @@
 services:
+  # Produção local (uso real no dia a dia)
   db:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: contabilidade
+      POSTGRES_DB: contabilidade_prod
       POSTGRES_USER: contabilidade
       POSTGRES_PASSWORD: contabilidade
     volumes:
-      - db_data:/var/lib/postgresql/data
+      - db_data_prod:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U contabilidade -d contabilidade"]
+      test: ["CMD-SHELL", "pg_isready -U contabilidade -d contabilidade_prod"]
       interval: 5s
       timeout: 5s
       retries: 20
@@ -19,12 +20,41 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql+psycopg2://contabilidade:contabilidade@db:5432/contabilidade
+      DATABASE_URL: postgresql+psycopg2://contabilidade:contabilidade@db:5432/contabilidade_prod
       SECRET_KEY: change-me
     ports:
       - "8008:8000"
     volumes:
       - .:/app
 
+  # Desenvolvimento/testes (isolado da base quente)
+  db_dev:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: contabilidade_dev
+      POSTGRES_USER: contabilidade
+      POSTGRES_PASSWORD: contabilidade
+    volumes:
+      - db_data_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U contabilidade -d contabilidade_dev"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web_dev:
+    build: .
+    depends_on:
+      db_dev:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://contabilidade:contabilidade@db_dev:5432/contabilidade_dev
+      SECRET_KEY: change-me
+    ports:
+      - "8010:8000"
+    volumes:
+      - .:/app
+
 volumes:
-  db_data:
+  db_data_prod:
+  db_data_dev:

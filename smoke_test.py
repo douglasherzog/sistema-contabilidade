@@ -12,7 +12,8 @@ from http.cookiejar import CookieJar
 from decimal import Decimal, ROUND_HALF_EVEN
 
 
-BASE = os.environ.get("BASE_URL", "http://localhost:8008").rstrip("/")
+BASE = os.environ.get("BASE_URL", "http://localhost:8010").rstrip("/")
+SMOKE_WEB_SERVICE = os.environ.get("SMOKE_WEB_SERVICE", "web_dev").strip() or "web_dev"
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -107,7 +108,7 @@ def main() -> int:
     # Optional: validate tax sync routine (requires docker + network)
     if os.environ.get("SMOKE_SKIP_DOCKER_SYNC") not in ("1", "true", "yes"):
         print("[2.1] Validate sync-taxes dry-run (docker)")
-        out = _run_cmd(["docker", "compose", "exec", "web", "flask", "sync-taxes"])
+        out = _run_cmd(["docker", "compose", "exec", SMOKE_WEB_SERVICE, "flask", "sync-taxes"])
         if "INSS (empregado):" not in out or "IRRF (mensal):" not in out:
             raise RuntimeError("sync-taxes output missing expected headers")
 
@@ -135,7 +136,7 @@ def main() -> int:
         # This keeps the smoke test more resilient to formatting/content changes upstream.
 
         print("[2.2] Validate sync-taxes --apply (docker)")
-        out2 = _run_cmd(["docker", "compose", "exec", "web", "flask", "sync-taxes", "--apply"])
+        out2 = _run_cmd(["docker", "compose", "exec", SMOKE_WEB_SERVICE, "flask", "sync-taxes", "--apply"])
         if "OK: tabelas gravadas no banco." not in out2:
             raise RuntimeError("sync-taxes --apply did not confirm DB write")
 
