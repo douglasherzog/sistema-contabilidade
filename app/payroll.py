@@ -10,6 +10,7 @@ from werkzeug.utils import secure_filename
 
 from .extensions import db
 from .models import (
+    CompetenceClose,
     Employee,
     EmployeeDependent,
     EmployeeSalary,
@@ -46,6 +47,10 @@ def _media_guides_dir() -> str:
 
 def _competence_start(year: int, month: int) -> date:
     return date(int(year), int(month), 1)
+
+
+def _competence_is_closed(year: int, month: int) -> bool:
+    return CompetenceClose.query.filter_by(year=int(year), month=int(month)).first() is not None
 
 
 def _salary_for_employee(employee: Employee, year: int, month: int) -> Decimal:
@@ -288,6 +293,12 @@ def payroll_edit(run_id: int):
 def payroll_save(run_id: int):
     run = PayrollRun.query.get_or_404(run_id)
 
+    if _competence_is_closed(run.year, run.month):
+        flash(
+            "Atenção: esta competência está marcada como FECHADA. Você ainda pode alterar, mas revise os relatórios/guias para manter tudo consistente.",
+            "warning",
+        )
+
     rate = _to_decimal(request.form.get("overtime_hour_rate"), default=Decimal("12.45"))
     if rate <= 0:
         rate = Decimal("12.45")
@@ -442,13 +453,91 @@ def close_home():
     year = int(request.args.get("year") or now.year)
     month = int(request.args.get("month") or now.month)
 
+    run = PayrollRun.query.filter_by(year=year, month=month).first()
+    comp = date(int(year), int(month), 1)
+    inss_eff, inss_rows = _latest_inss_brackets(comp)
+    irrf_cfg = _latest_irrf_config(comp)
+    irrf_eff, irrf_rows = _latest_irrf_brackets(comp)
+    closed = CompetenceClose.query.filter_by(year=year, month=month).first()
+
     docs = {
         "darf": GuideDocument.query.filter_by(year=year, month=month, doc_type="darf").first(),
         "das": GuideDocument.query.filter_by(year=year, month=month, doc_type="das").first(),
         "fgts": GuideDocument.query.filter_by(year=year, month=month, doc_type="fgts").first(),
     }
 
-    return render_template("payroll/close_home.html", year=year, month=month, docs=docs)
+    checklist = {
+        "payroll": {
+            "ok": bool(run),
+            "title": "Folha do mês",
+            "help": "Você precisa ter uma folha criada para esta competência, para gerar holerites e apurar valores.",
+            "action_url": (url_for("payroll.payroll_home", year=year, month=month)),
+            "action_label": "Abrir folha",
+        },
+        "taxes": {
+            "ok": bool(inss_rows) and bool(irrf_rows) and bool(irrf_cfg),
+            "title": "Tabelas de INSS/IRRF",
+            "help": "Essas tabelas são usadas para estimar descontos no holerite. Se estiver vazio, rode o sync ou configure manualmente.",
+            "action_url": url_for("payroll.tax_config"),
+            "action_label": "Ver configurações",
+            "meta": {
+                "inss_eff": (inss_eff.isoformat() if inss_eff else None),
+                "irrf_eff": (irrf_eff.isoformat() if irrf_eff else None),
+            },
+        },
+        "guides": {
+            "ok": all(bool(docs.get(k)) for k in ("darf", "das", "fgts")),
+            "title": "Guias anexadas (DARF/DAS/FGTS)",
+            "help": "Anexe os PDFs das guias da competência. Isso ajuda a centralizar e conferir antes de pagar.",
+            "action_url": url_for("payroll.close_home", year=year, month=month),
+            "action_label": "Anexar guias",
+        },
+    }
+
+    return render_template(
+        "payroll/close_home.html",
+        year=year,
+        month=month,
+        docs=docs,
+        run=run,
+        closed=closed,
+        checklist=checklist,
+    )
+
+
+@payroll_bp.post("/close/mark")
+@login_required
+def close_mark():
+    year = int(request.form.get("year") or 0)
+    month = int(request.form.get("month") or 0)
+    if year < 2000 or month < 1 or month > 12:
+        flash("Competência inválida.", "warning")
+        return redirect(url_for("payroll.close_home"))
+
+    row = CompetenceClose.query.filter_by(year=year, month=month).first()
+    if not row:
+        row = CompetenceClose(year=year, month=month)
+        db.session.add(row)
+        db.session.commit()
+    flash("Competência marcada como FECHADA (com aviso).", "success")
+    return redirect(url_for("payroll.close_home", year=year, month=month))
+
+
+@payroll_bp.post("/close/reopen")
+@login_required
+def close_reopen():
+    year = int(request.form.get("year") or 0)
+    month = int(request.form.get("month") or 0)
+    if year < 2000 or month < 1 or month > 12:
+        flash("Competência inválida.", "warning")
+        return redirect(url_for("payroll.close_home"))
+
+    row = CompetenceClose.query.filter_by(year=year, month=month).first()
+    if row:
+        db.session.delete(row)
+        db.session.commit()
+    flash("Competência reaberta.", "success")
+    return redirect(url_for("payroll.close_home", year=year, month=month))
 
 
 @payroll_bp.post("/close/upload")
@@ -457,6 +546,12 @@ def close_upload():
     year = int(request.form.get("year") or 0)
     month = int(request.form.get("month") or 0)
     doc_type = (request.form.get("doc_type") or "").strip().lower()
+
+    if _competence_is_closed(year, month):
+        flash(
+            "Atenção: esta competência está marcada como FECHADA. Você pode substituir o PDF, mas revise se o fechamento continua correto.",
+            "warning",
+        )
 
     if year < 2000 or month < 1 or month > 12:
         flash("Competência inválida.", "warning")

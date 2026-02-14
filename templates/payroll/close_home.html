@@ -2,8 +2,38 @@
 {% block title %}Fechamento - Sistema Contabilidade{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-  <h1 class="h4 mb-0">Fechamento</h1>
+  <div>
+    <h1 class="h4 mb-0">Fechamento</h1>
+    <div class="text-muted small">Checklist do mês para você conferir se está tudo pronto antes de pagar as guias e encerrar a competência.</div>
+  </div>
+  <div class="d-flex gap-2">
+    {% if closed %}
+      <form method="post" action="{{ url_for('payroll.close_reopen') }}">
+        <input type="hidden" name="year" value="{{ year }}">
+        <input type="hidden" name="month" value="{{ month }}">
+        <button class="btn btn-outline-secondary" type="submit">Reabrir competência</button>
+      </form>
+    {% else %}
+      <form method="post" action="{{ url_for('payroll.close_mark') }}">
+        <input type="hidden" name="year" value="{{ year }}">
+        <input type="hidden" name="month" value="{{ month }}">
+        <button class="btn btn-primary" type="submit">Marcar como fechada</button>
+      </form>
+    {% endif %}
+  </div>
 </div>
+
+{% if closed %}
+  <div class="alert alert-warning">
+    <strong>Competência marcada como FECHADA.</strong>
+    <div class="small">Isso não bloqueia alterações, mas o sistema vai te avisar quando você mexer em dados do mês para evitar inconsistências.</div>
+  </div>
+{% else %}
+  <div class="alert alert-light border">
+    <strong>Competência em aberto.</strong>
+    <div class="small text-muted">Quando tudo estiver OK no checklist abaixo, você pode marcar como fechada para organização.</div>
+  </div>
+{% endif %}
 
 <div class="card mb-3">
   <div class="card-body">
@@ -21,6 +51,35 @@
       </div>
     </form>
   </div>
+</div>
+
+<div class="row g-3 mb-3">
+  {% for key, item in checklist.items() %}
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <h2 class="h6 mb-1">{{ item.title }}</h2>
+          {% if item.ok %}
+            <span class="badge text-bg-success">OK</span>
+          {% else %}
+            <span class="badge text-bg-warning">Pendente</span>
+          {% endif %}
+        </div>
+        <div class="small text-muted mb-3">{{ item.help }}</div>
+
+        {% if key == 'taxes' and item.meta %}
+          <div class="small text-muted mb-3">
+            INSS: {{ item.meta.inss_eff or '—' }}<br>
+            IRRF: {{ item.meta.irrf_eff or '—' }}
+          </div>
+        {% endif %}
+
+        <a class="btn btn-sm btn-outline-primary" href="{{ item.action_url }}">{{ item.action_label }}</a>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
 </div>
 
 <div class="row g-3">

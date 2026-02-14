@@ -112,15 +112,23 @@ def main() -> int:
             raise RuntimeError("sync-taxes output missing expected headers")
 
         # Structural validation: require at least a few bracket rows for each table.
-        inss_rows = re.findall(r"^\s*-\s*at[eé]\s*=.*aliquota\s*=", out, re.IGNORECASE | re.MULTILINE)
-        irrf_rows = re.findall(r"^\s*-\s*at[eé]\s*=.*aliquota\s*=.*deduzir\s*=", out, re.IGNORECASE | re.MULTILINE)
-        if len(inss_rows) < 3:
-            raise RuntimeError(f"sync-taxes output seems to have too few INSS rows: {len(inss_rows)}")
-        if len(irrf_rows) < 3:
-            raise RuntimeError(f"sync-taxes output seems to have too few IRRF rows: {len(irrf_rows)}")
+        # docker compose exec output can include line wraps/CRs depending on TTY.
+        # Split sections and count simple markers (more robust than matching full lines).
+        try:
+            inss_section = out.split("INSS (empregado):", 1)[1].split("IRRF (mensal):", 1)[0]
+            irrf_section = out.split("IRRF (mensal):", 1)[1]
+        except Exception:
+            raise RuntimeError("sync-taxes output could not be split into INSS/IRRF sections")
+
+        inss_count = len(re.findall(r"aliquota\s*=", inss_section, re.IGNORECASE))
+        irrf_count = len(re.findall(r"deduzir\s*=", irrf_section, re.IGNORECASE))
+        if inss_count < 3:
+            raise RuntimeError(f"sync-taxes output seems to have too few INSS rows: {inss_count}")
+        if irrf_count < 3:
+            raise RuntimeError(f"sync-taxes output seems to have too few IRRF rows: {irrf_count}")
 
         # Dedução por dependente should be present (value may vary by year).
-        if not re.search(r"Dedu[cç][aã]o\s+por\s+dependente:\s*[0-9]+\.[0-9]{2}", out, re.IGNORECASE):
+        if not re.search(r"dependente:\s*[0-9]+[\.,][0-9]{2}", out, re.IGNORECASE):
             raise RuntimeError("sync-taxes output missing dependent deduction line")
 
         # Optional numeric markers (2026-specific). If present, great; if absent, do not fail.
@@ -267,6 +275,30 @@ def main() -> int:
     expected_guide = f"/media/guides/{test_year}-{test_month:02d}_das.pdf"
     if expected_guide not in close_page:
         raise RuntimeError("Expected DAS guide link not found in close page")
+
+    print("[10] Mark competence as closed (warn-only)")
+    _request(opener, "POST", "/payroll/close/mark", {"year": str(test_year), "month": str(test_month)})
+    close_page2 = _request(
+        opener,
+        "GET",
+        f"/payroll/close?year={test_year}&month={test_month}",
+    ).read().decode("utf-8", errors="replace")
+    if "Competência marcada como FECHADA" not in close_page2:
+        raise RuntimeError("Close page did not show competence as closed")
+    if "Reabrir competência" not in close_page2:
+        raise RuntimeError("Close page missing reopen action when closed")
+
+    print("[11] Reopen competence")
+    _request(opener, "POST", "/payroll/close/reopen", {"year": str(test_year), "month": str(test_month)})
+    close_page3 = _request(
+        opener,
+        "GET",
+        f"/payroll/close?year={test_year}&month={test_month}",
+    ).read().decode("utf-8", errors="replace")
+    if "Competência em aberto" not in close_page3:
+        raise RuntimeError("Close page did not show competence reopened")
+    if "Marcar como fechada" not in close_page3:
+        raise RuntimeError("Close page missing mark action when reopened")
 
     print("OK: smoke test passed")
     return 0

@@ -15,3 +15,4 @@ Este diretório concentra a documentação do projeto.
 
 - `docs/workflow.md` (workflow e checklist)
 - `docs/testing.md` (como validar e rodar testes)
+- `docs/ux.md` (diretrizes de interface didática e auto-explicativa)

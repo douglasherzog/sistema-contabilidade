@@ -146,3 +146,12 @@ class TaxIrrfBracket(db.Model):
     rate = db.Column(db.Numeric(8, 6), nullable=False)  # ex.: 0.075
     deduction = db.Column(db.Numeric(12, 2), nullable=False, default=0)  # parcela a deduzir
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+
+class CompetenceClose(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    year = db.Column(db.Integer, nullable=False, index=True)
+    month = db.Column(db.Integer, nullable=False, index=True)
+    closed_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (db.UniqueConstraint("year", "month", name="uq_competence_close_year_month"),)
