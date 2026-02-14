@@ -39,8 +39,25 @@
     var s = (v || "").trim();
     if (!s) return null;
     s = s.replace(/\s+/g, "");
-    s = s.replace(/\./g, "");
-    s = s.replace(/,/g, ".");
+
+    // Normalize optional currency prefix.
+    s = s.replace(/^R\$/i, "");
+
+    var hasDot = s.indexOf(".") >= 0;
+    var hasComma = s.indexOf(",") >= 0;
+
+    if (hasDot && hasComma) {
+      // pt-BR full format: 1.234,56
+      s = s.replace(/\./g, "");
+      s = s.replace(/,/g, ".");
+    } else if (hasComma) {
+      // 1234,56
+      s = s.replace(/,/g, ".");
+    } else {
+      // 1234.56 (common server-rendered decimal string)
+      // keep dot as decimal separator
+    }
+
     var n = Number(s);
     if (!isFinite(n)) return null;
     return n;

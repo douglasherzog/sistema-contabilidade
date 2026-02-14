@@ -179,7 +179,8 @@ def main() -> int:
 
     print("[6] Save overtime")
     payload = {
-        "overtime_hour_rate": "12,45",
+        "overtime_weekly_hours": "44,00",
+        "overtime_additional_pct": "50,00",
         f"overtime_hours_{deise_id}": "10,50",
         f"overtime_hours_{juvenaldo_id}": "0,00",
     }
@@ -190,7 +191,8 @@ def main() -> int:
 
     base = Decimal("1685.00")
     hours = Decimal("10.50")
-    rate = Decimal("12.45")
+    monthly_hours = Decimal("220.00")  # 44h semanais * fator mensal 5
+    rate = ((base / monthly_hours) * Decimal("1.50")).quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
     overtime = (hours * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
     total = (base + overtime).quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
 

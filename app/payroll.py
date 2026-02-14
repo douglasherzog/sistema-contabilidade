@@ -108,15 +108,16 @@ TUTORIALS: dict[str, dict] = {
     "folha_edicao": {
         "title": "Folha (edição)",
         "goal": "Lançar horas extras e gerar holerites.",
-        "first_step": "Preencha valor/hora extra e depois horas por funcionário.",
+        "first_step": "Preencha jornada semanal e adicional; depois informe as horas extras por funcionário.",
         "fields": [
-            {"name": "Valor hora extra", "explain": "Valor unitário usado no cálculo das horas extras."},
+            {"name": "Jornada semanal", "explain": "Carga horária contratual da competência (ex.: 44,00)."},
+            {"name": "Adicional hora extra", "explain": "Percentual aplicado sobre a hora normal (ex.: 50,00)."},
             {"name": "Horas extras por funcionário", "explain": "Quantidade no mês (aceita decimal)."},
         ],
         "steps": [
-            "Lance as horas extras de cada funcionário.",
-            "Clique em Salvar.",
-            "Abra o Holerite para conferência individual.",
+            "Informe jornada semanal e adicional no topo da tela.",
+            "Preencha as horas extras por funcionário.",
+            "Clique em salvar para recalcular automaticamente valor/hora extra, total bruto e holerite.",
         ],
     },
     "ferias": {
@@ -415,6 +416,25 @@ def _to_decimal(v: str | None, default: Decimal = Decimal("0")) -> Decimal:
         return Decimal(s)
     except (InvalidOperation, ValueError):
         return default
+
+
+def _monthly_hours_from_weekly(weekly_hours: Decimal | None) -> Decimal:
+    weekly = Decimal(str(weekly_hours or 0))
+    if weekly <= 0:
+        weekly = Decimal("44")
+    return (weekly * Decimal("5")).quantize(Decimal("0.01"))
+
+
+def _overtime_rate_from_salary(base_salary: Decimal | None, weekly_hours: Decimal | None, additional_pct: Decimal | None) -> Decimal:
+    base = Decimal(str(base_salary or 0))
+    month_hours = _monthly_hours_from_weekly(weekly_hours)
+    additional = Decimal(str(additional_pct or 0))
+    if additional < 0:
+        additional = Decimal("0")
+    if base <= 0 or month_hours <= 0:
+        return Decimal("0")
+    multiplier = Decimal("1") + (additional / Decimal("100"))
+    return ((base / month_hours) * multiplier).quantize(Decimal("0.01"))
 
 
 def _parse_date(v: str | None) -> date | None:
@@ -1227,19 +1247,26 @@ def payroll_create_or_open():
 
     run = PayrollRun.query.filter_by(year=year, month=month).first()
     if not run:
-        run = PayrollRun(year=year, month=month, overtime_hour_rate=Decimal("12.45"))
+        run = PayrollRun(
+            year=year,
+            month=month,
+            overtime_hour_rate=Decimal("12.45"),
+            overtime_weekly_hours=Decimal("44"),
+            overtime_additional_pct=Decimal("50"),
+        )
         db.session.add(run)
         db.session.flush()
 
         employees = Employee.query.filter_by(active=True).order_by(Employee.full_name.asc()).all()
         for e in employees:
             base = _salary_for_employee(e, year, month)
+            line_rate = _overtime_rate_from_salary(base, run.overtime_weekly_hours, run.overtime_additional_pct)
             line = PayrollLine(
                 payroll_run_id=run.id,
                 employee_id=e.id,
                 base_salary=base,
                 overtime_hours=Decimal("0"),
-                overtime_hour_rate=run.overtime_hour_rate,
+                overtime_hour_rate=line_rate,
                 overtime_amount=Decimal("0"),
                 gross_total=base,
             )
@@ -1255,7 +1282,8 @@ def payroll_create_or_open():
 def payroll_edit(run_id: int):
     run = PayrollRun.query.get_or_404(run_id)
     lines = PayrollLine.query.filter_by(payroll_run_id=run.id).order_by(PayrollLine.id.asc()).all()
-    return render_template("payroll/payroll_edit.html", run=run, lines=lines)
+    monthly_hours = _monthly_hours_from_weekly(Decimal(str(run.overtime_weekly_hours or 44)))
+    return render_template("payroll/payroll_edit.html", run=run, lines=lines, monthly_hours=monthly_hours)
 
 
 @payroll_bp.post("/<int:run_id>")
@@ -1269,22 +1297,40 @@ def payroll_save(run_id: int):
             "warning",
         )
 
-    rate = _to_decimal(request.form.get("overtime_hour_rate"), default=Decimal("12.45"))
-    if rate <= 0:
-        rate = Decimal("12.45")
-    run.overtime_hour_rate = rate
+    weekly_hours = _to_decimal(
+        request.form.get("overtime_weekly_hours"),
+        default=Decimal(str(run.overtime_weekly_hours or 44)),
+    )
+    if weekly_hours <= 0:
+        weekly_hours = Decimal("44")
+
+    additional_pct = _to_decimal(
+        request.form.get("overtime_additional_pct"),
+        default=Decimal(str(run.overtime_additional_pct or 50)),
+    )
+    if additional_pct < 0:
+        additional_pct = Decimal("0")
+
+    run.overtime_weekly_hours = weekly_hours
+    run.overtime_additional_pct = additional_pct
 
     lines = PayrollLine.query.filter_by(payroll_run_id=run.id).all()
+    first_rate = None
     for ln in lines:
         key = f"overtime_hours_{ln.employee_id}"
         hours = _to_decimal(request.form.get(key), default=Decimal("0"))
         if hours < 0:
             hours = Decimal("0")
+        rate = _overtime_rate_from_salary(ln.base_salary, run.overtime_weekly_hours, run.overtime_additional_pct)
         ln.overtime_hours = hours
         ln.overtime_hour_rate = rate
         ln.overtime_amount = (hours * rate).quantize(Decimal("0.01"))
         ln.gross_total = (Decimal(str(ln.base_salary)) + ln.overtime_amount).quantize(Decimal("0.01"))
+        if first_rate is None:
+            first_rate = rate
         db.session.add(ln)
+
+    run.overtime_hour_rate = first_rate if first_rate is not None else Decimal("0")
 
     db.session.add(run)
     db.session.commit()

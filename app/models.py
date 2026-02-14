@@ -79,6 +79,8 @@ class PayrollRun(db.Model):
     year = db.Column(db.Integer, nullable=False, index=True)
     month = db.Column(db.Integer, nullable=False, index=True)
     overtime_hour_rate = db.Column(db.Numeric(12, 2), nullable=False, default=12.45)
+    overtime_weekly_hours = db.Column(db.Numeric(8, 2), nullable=False, default=44)
+    overtime_additional_pct = db.Column(db.Numeric(8, 2), nullable=False, default=50)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     lines = db.relationship(

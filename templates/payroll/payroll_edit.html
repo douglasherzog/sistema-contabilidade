@@ -14,7 +14,7 @@
   </div>
   <div class="lav-callout is-info mt-3">
     <strong>Como preencher</strong>
-    <div class="small">1) Informe o <strong>valor/hora extra</strong>. 2) Lance as <strong>horas extras</strong> por funcionário. 3) Clique em <strong>Salvar</strong>.</div>
+    <div class="small">1) Informe a <strong>jornada semanal</strong> e o <strong>adicional de hora extra</strong>. 2) Lance as <strong>horas extras</strong> por funcionário. 3) Clique em <strong>Salvar</strong> para recalcular automaticamente.</div>
   </div>
 </div>
 
@@ -27,8 +27,14 @@
 
     <div class="row g-2 align-items-end mb-3">
       <div class="col-md-4">
-        <label class="form-label" for="overtime_hour_rate">Valor hora extra (R$)</label>
-        <input class="form-control js-money" id="overtime_hour_rate" name="overtime_hour_rate" value="{{ '%.2f'|format(run.overtime_hour_rate or 12.45) }}" required>
+        <label class="form-label" for="overtime_weekly_hours">Jornada semanal (h)</label>
+        <input class="form-control js-money" id="overtime_weekly_hours" name="overtime_weekly_hours" value="{{ '%.2f'|format(run.overtime_weekly_hours or 44) }}" required>
+        <div class="form-text">Ex.: 44,00 (integral). Divisor mensal atual: {{ '%.2f'|format(monthly_hours or 220) }} h.</div>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label" for="overtime_additional_pct">Adicional hora extra (%)</label>
+        <input class="form-control js-money" id="overtime_additional_pct" name="overtime_additional_pct" value="{{ '%.2f'|format(run.overtime_additional_pct or 50) }}" required>
+        <div class="form-text">Ex.: 50,00 para adicional de 50%.</div>
       </div>
     </div>
 
@@ -43,6 +49,7 @@
           <tr>
             <th>Funcionário</th>
             <th class="text-end">Salário base</th>
+            <th class="text-end">Valor/hora extra (calc.)</th>
             <th class="text-end">Horas extras</th>
             <th class="text-end">Total horas extras</th>
             <th class="text-end">Total bruto</th>
@@ -54,6 +61,7 @@
           <tr>
             <td>{{ ln.employee.full_name }}</td>
             <td class="text-end">R$ {{ '%.2f'|format(ln.base_salary or 0) }}</td>
+            <td class="text-end">R$ {{ '%.2f'|format(ln.overtime_hour_rate or 0) }}</td>
             <td class="text-end lav-cell-input-narrow">
               <input class="form-control form-control-sm text-end" name="overtime_hours_{{ ln.employee_id }}" value="{{ '%.2f'|format(ln.overtime_hours or 0) }}" aria-label="Horas extras - {{ ln.employee.full_name }}">
               <div class="form-text">Ex.: 10,50</div>
