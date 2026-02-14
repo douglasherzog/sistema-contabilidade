@@ -1934,21 +1934,41 @@ def close_run_compliance():
         else:
             flash(f"Compliance-check encontrou {len(result.get('issues') or [])} alerta(s).", "warning")
 
-        session[f"payroll_close_compliance:{year}-{month}"] = {
+        payload = {
             "target_year": year,
+            "target_month": month,
             "ok": bool(result.get("ok")),
             "issues_count": len(result.get("issues") or []),
             "report_lines": list(result.get("report_lines") or []),
             "sync_report_lines": list(result.get("sync_report_lines") or []),
+            "ran_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        session[f"payroll_close_compliance:{year}-{month}"] = payload
+        session["payroll_last_compliance_check"] = {
+            "target_year": payload["target_year"],
+            "target_month": payload["target_month"],
+            "ok": payload["ok"],
+            "issues_count": payload["issues_count"],
+            "ran_at": payload["ran_at"],
         }
     except Exception as e:
         flash(f"Falha ao executar compliance-check: {e}", "warning")
-        session[f"payroll_close_compliance:{year}-{month}"] = {
+        payload = {
             "target_year": year,
+            "target_month": month,
             "ok": False,
             "issues_count": 1,
             "report_lines": [f"ERRO: {e}"],
             "sync_report_lines": [],
+            "ran_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        session[f"payroll_close_compliance:{year}-{month}"] = payload
+        session["payroll_last_compliance_check"] = {
+            "target_year": payload["target_year"],
+            "target_month": payload["target_month"],
+            "ok": payload["ok"],
+            "issues_count": payload["issues_count"],
+            "ran_at": payload["ran_at"],
         }
 
     return redirect(url_for("payroll.close_home", year=year, month=month))

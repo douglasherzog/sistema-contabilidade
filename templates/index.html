@@ -52,6 +52,76 @@
   </div>
 </div>
 
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Ação de hoje (automática)</h2>
+      <div class="lav-meta">Prioriza o que vence hoje ou está em atraso</div>
+    </div>
+
+    {% if proactive_action %}
+      <div class="lav-callout is-warning mb-2">
+        <strong>{{ proactive_action.title }}</strong>
+        <div class="small">{{ proactive_action.reminder }}</div>
+      </div>
+      <a class="btn btn-sm btn-primary" href="{{ proactive_action.action_url }}">{{ proactive_action.action_label }}</a>
+    {% else %}
+      <div class="lav-callout is-success mb-0">
+        <strong>Nenhuma obrigação crítica hoje.</strong>
+        <div class="small">Continue acompanhando a semana para evitar pendências de última hora.</div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="lav-section-title mb-2">
+      <h2 class="h6 mb-0">Resumo semanal automático</h2>
+      <div class="lav-meta">Visão rápida das obrigações para agir cedo</div>
+    </div>
+
+    <div class="row g-3 mb-2">
+      <div class="col-md-4">
+        <div class="small text-muted">Atrasados</div>
+        <div><strong>{{ weekly_summary.overdue_count }}</strong></div>
+      </div>
+      <div class="col-md-4">
+        <div class="small text-muted">Vencem hoje</div>
+        <div><strong>{{ weekly_summary.today_count }}</strong></div>
+      </div>
+      <div class="col-md-4">
+        <div class="small text-muted">Próximos 7 dias</div>
+        <div><strong>{{ weekly_summary.next_7_days_count }}</strong></div>
+      </div>
+    </div>
+
+    {% if weekly_summary.last_compliance %}
+      <div class="small">
+        Último compliance-check: 
+        {% if weekly_summary.last_compliance.ok %}
+          <span class="badge text-bg-success">sem alertas</span>
+        {% else %}
+          <span class="badge text-bg-warning">{{ weekly_summary.last_compliance.issues_count }} alerta(s)</span>
+        {% endif %}
+        <span class="text-muted">({{ weekly_summary.last_compliance.target_month }}/{{ weekly_summary.last_compliance.target_year }} em {{ weekly_summary.last_compliance.ran_at }})</span>
+      </div>
+    {% else %}
+      <div class="small text-muted">Último compliance-check: ainda não executado nesta sessão.</div>
+    {% endif %}
+
+    {% if overdue_items %}
+      <hr>
+      <div class="small text-muted mb-1">Pendências críticas em atraso:</div>
+      <div class="small">
+        {% for item in overdue_items %}
+          <div><strong>{{ item.title }}</strong> — {{ item.reminder }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  </div>
+</div>
+
 <div class="card">
   <div class="card-body">
     <div class="lav-section-title mb-2">

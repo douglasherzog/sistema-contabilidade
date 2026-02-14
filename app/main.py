@@ -1,7 +1,7 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
-from flask import Blueprint, render_template, request, url_for
+from flask import Blueprint, render_template, request, session, url_for
 from flask_login import login_required, current_user
 
 from .extensions import db
@@ -35,6 +35,95 @@ def _latest_inss_effective(effective_date: date):
         .limit(1)
         .scalar()
     )
+
+
+def _next_month(year: int, month: int) -> tuple[int, int]:
+    if int(month) == 12:
+        return int(year) + 1, 1
+    return int(year), int(month) + 1
+
+
+def _reminder_label(days_left: int | None, paid_at: date | None) -> str:
+    if paid_at:
+        return "Concluido"
+    if days_left is None:
+        return "Sem vencimento definido"
+    if days_left < 0:
+        return f"Atrasado ha {abs(days_left)} dia(s)"
+    if days_left == 0:
+        return "Vence hoje (D-0)"
+    if days_left == 1:
+        return "Vence amanha (D-1)"
+    if days_left <= 3:
+        return f"Prazo critico (D-{days_left})"
+    if days_left <= 7:
+        return f"Planejar esta semana (D-{days_left})"
+    return f"No radar (D-{days_left})"
+
+
+def _agenda_bucket(days_left: int | None, paid_at: date | None) -> str:
+    if paid_at:
+        return "done"
+    if days_left is None:
+        return "next_7_days"
+    if days_left < 0:
+        return "overdue"
+    if days_left == 0:
+        return "today"
+    if days_left <= 7:
+        return "next_7_days"
+    return "later"
+
+
+def _build_home_obligations(year: int, month: int, docs: dict[str, GuideDocument | None]) -> list[dict]:
+    today = date.today()
+    ny, nm = _next_month(year, month)
+    default_due = date(int(ny), int(nm), 20)
+
+    out: list[dict] = []
+    for key, title in (
+        ("das", "DAS"),
+        ("fgts", "FGTS Digital"),
+        ("darf", "DARF folha"),
+    ):
+        doc = docs.get(key)
+        due_date = (getattr(doc, "due_date", None) if doc else None) or default_due
+        paid_at = getattr(doc, "paid_at", None) if doc else None
+        days_left = (due_date - today).days if due_date else None
+        bucket = _agenda_bucket(days_left=days_left, paid_at=paid_at)
+        out.append(
+            {
+                "key": key,
+                "title": title,
+                "due_date": due_date,
+                "paid_at": paid_at,
+                "days_left": days_left,
+                "bucket": bucket,
+                "reminder": _reminder_label(days_left=days_left, paid_at=paid_at),
+                "action_url": url_for("payroll.close_home", year=year, month=month),
+                "action_label": "Abrir fechamento",
+            }
+        )
+
+    compliance_due = default_due - timedelta(days=2)
+    compliance_days_left = (compliance_due - today).days
+    compliance_bucket = _agenda_bucket(days_left=compliance_days_left, paid_at=None)
+    out.append(
+        {
+            "key": "compliance",
+            "title": "Compliance-check final",
+            "due_date": compliance_due,
+            "paid_at": None,
+            "days_left": compliance_days_left,
+            "bucket": compliance_bucket,
+            "reminder": _reminder_label(days_left=compliance_days_left, paid_at=None),
+            "action_url": url_for("payroll.close_home", year=year, month=month),
+            "action_label": "Abrir fechamento",
+        }
+    )
+
+    out.sort(key=lambda x: (x.get("due_date") is None, x.get("due_date") or date.max))
+    return out
 
 
 def _latest_irrf_effective(effective_date: date):
@@ -74,6 +163,24 @@ def index():
         "darf": GuideDocument.query.filter_by(year=year, month=month, doc_type="darf").first(),
         "das": GuideDocument.query.filter_by(year=year, month=month, doc_type="das").first(),
         "fgts": GuideDocument.query.filter_by(year=year, month=month, doc_type="fgts").first(),
+    }
+    home_obligations = _build_home_obligations(year=year, month=month, docs=docs)
+    overdue_items = [it for it in home_obligations if it.get("bucket") == "overdue"]
+    today_items = [it for it in home_obligations if it.get("bucket") == "today"]
+    next_7_items = [it for it in home_obligations if it.get("bucket") == "next_7_days"]
+
+    proactive_action = None
+    if today_items:
+        proactive_action = today_items[0]
+    elif overdue_items:
+        proactive_action = overdue_items[0]
+
+    last_compliance = session.get("payroll_last_compliance_check")
+    weekly_summary = {
+        "overdue_count": len(overdue_items),
+        "next_7_days_count": len(next_7_items),
+        "today_count": len(today_items),
+        "last_compliance": last_compliance,
     }
 
     # Vacations summary for the month
@@ -119,7 +226,7 @@ def index():
             "action_url": url_for("payroll.tax_config"),
         },
         "guides": {
-            "ok": all(bool(docs.get(k)) for k in ("darf", "das", "fgts")),
+            "ok": all(bool(docs.get(k)) and bool(getattr(docs.get(k), "filename", None)) for k in ("darf", "das", "fgts")),
             "docs": docs,
             "action_url": url_for("payroll.close_home", year=year, month=month),
         },
@@ -203,4 +310,7 @@ def index():
         month=month,
         status=status,
         next_step=next_step,
+        proactive_action=proactive_action,
+        overdue_items=overdue_items,
+        weekly_summary=weekly_summary,
     )

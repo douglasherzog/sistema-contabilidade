@@ -8,6 +8,7 @@ import urllib.parse
 import urllib.request
 import urllib.error
 from http.cookiejar import CookieJar
+from datetime import date, timedelta
 
 from decimal import Decimal, ROUND_HALF_EVEN
 
@@ -104,6 +105,13 @@ def main() -> int:
 
     print("[2] Login")
     _request(opener, "POST", "/auth/login", {"email": email, "password": password})
+
+    print("[2.0] Validate homepage proactive cards")
+    home_page = _request(opener, "GET", f"/?year={test_year}&month={test_month}").read().decode("utf-8", errors="replace")
+    if "Ação de hoje (automática)" not in home_page:
+        raise RuntimeError("Home page missing proactive action card")
+    if "Resumo semanal automático" not in home_page:
+        raise RuntimeError("Home page missing weekly automatic summary card")
 
     # Optional: validate tax sync routine (requires docker + network)
     if os.environ.get("SMOKE_SKIP_DOCKER_SYNC") not in ("1", "true", "yes"):
@@ -441,6 +449,12 @@ def main() -> int:
 
     print("[8] Upload sample guides (DAS/DARF/FGTS)")
     sample_pdf = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
+    today = date.today()
+    due_dates = {
+        "das": (today - timedelta(days=2)).isoformat(),
+        "darf": today.isoformat(),
+        "fgts": (today + timedelta(days=3)).isoformat(),
+    }
     for dtype, amount in (("das", "123,45"), ("darf", "98,10"), ("fgts", "77,00")):
         mp_body, boundary = _multipart(
             {
@@ -448,7 +462,7 @@ def main() -> int:
                 "month": str(test_month),
                 "doc_type": dtype,
                 "amount": amount,
-                "due_date": "2026-03-20",
+                "due_date": due_dates[dtype],
                 "paid_at": "",
             },
             {"file": {"filename": f"{dtype}.pdf", "content_type": "application/pdf", "content": sample_pdf}},
@@ -478,6 +492,11 @@ def main() -> int:
 
     if "Resumo do mês" not in close_page or "Total bruto" not in close_page:
         raise RuntimeError("Close page did not show the monthly summary block")
+
+    if "Agenda automática de obrigações" not in close_page:
+        raise RuntimeError("Close page missing automatic obligations agenda block")
+    if "Como resolver agora:" not in close_page:
+        raise RuntimeError("Close page missing guided resolution steps for critical agenda items")
 
     print("[10] Mark competence as closed (warn-only)")
     _request(opener, "POST", "/payroll/close/mark", {"year": str(test_year), "month": str(test_month)})
