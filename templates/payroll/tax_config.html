@@ -25,7 +25,7 @@
         <form method="post" action="{{ url_for('payroll.tax_inss_add') }}" class="row g-2 align-items-end mb-3">
           <div class="col-4">
             <label class="form-label" for="inss_effective">Vigência</label>
-            <input class="form-control" type="date" id="inss_effective" name="effective_from" required>
+            <input class="form-control js-date" type="text" id="inss_effective" name="effective_from" placeholder="dd/mm/aaaa" inputmode="numeric" required>
           </div>
           <div class="col-4">
             <label class="form-label" for="inss_up_to">Até (R$)</label>
@@ -70,7 +70,7 @@
         <form method="post" action="{{ url_for('payroll.tax_irrf_config_set') }}" class="row g-2 align-items-end mb-3">
           <div class="col-4">
             <label class="form-label" for="irrf_effective">Vigência</label>
-            <input class="form-control" type="date" id="irrf_effective" name="effective_from" required>
+            <input class="form-control js-date" type="text" id="irrf_effective" name="effective_from" placeholder="dd/mm/aaaa" inputmode="numeric" required>
           </div>
           <div class="col-8">
             <label class="form-label" for="irrf_dep">Dedução por dependente (R$)</label>
@@ -84,7 +84,7 @@
         <form method="post" action="{{ url_for('payroll.tax_irrf_add') }}" class="row g-2 align-items-end mb-3">
           <div class="col-4">
             <label class="form-label" for="irrf_b_effective">Vigência</label>
-            <input class="form-control" type="date" id="irrf_b_effective" name="effective_from" required>
+            <input class="form-control js-date" type="text" id="irrf_b_effective" name="effective_from" placeholder="dd/mm/aaaa" inputmode="numeric" required>
           </div>
           <div class="col-3">
             <label class="form-label" for="irrf_up_to">Até (R$)</label>

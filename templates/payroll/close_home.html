@@ -184,11 +184,11 @@
           </div>
           <div class="mb-2">
             <label class="form-label" for="due_{{ dtype }}">Vencimento (opcional)</label>
-            <input class="form-control" type="date" id="due_{{ dtype }}" name="due_date">
+            <input class="form-control js-date" type="text" id="due_{{ dtype }}" name="due_date" placeholder="dd/mm/aaaa" inputmode="numeric">
           </div>
           <div class="mb-3">
             <label class="form-label" for="paid_{{ dtype }}">Pago em (opcional)</label>
-            <input class="form-control" type="date" id="paid_{{ dtype }}" name="paid_at">
+            <input class="form-control js-date" type="text" id="paid_{{ dtype }}" name="paid_at" placeholder="dd/mm/aaaa" inputmode="numeric">
           </div>
           <button class="btn btn-primary" type="submit">Salvar</button>
         </form>

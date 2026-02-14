@@ -40,6 +40,26 @@ def _to_decimal(v: str | None, default: Decimal = Decimal("0")) -> Decimal:
         return default
 
 
+def _parse_date(v: str | None) -> date | None:
+    s = (v or "").strip()
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(s)
+    except Exception:
+        pass
+    try:
+        parts = s.split("/")
+        if len(parts) != 3:
+            return None
+        dd, mm, yyyy = (p.strip() for p in parts)
+        if len(yyyy) == 2:
+            yyyy = "20" + yyyy
+        return date(int(yyyy), int(mm), int(dd))
+    except Exception:
+        return None
+
+
 def _media_guides_dir() -> str:
     p = os.path.join(current_app.instance_path, "media", "guides")
     os.makedirs(p, exist_ok=True)
@@ -232,12 +252,7 @@ def employees_create():
     full_name = (request.form.get("full_name") or "").strip()
     cpf = (request.form.get("cpf") or "").strip() or None
     hired_at_raw = (request.form.get("hired_at") or "").strip()
-    hired_at = None
-    if hired_at_raw:
-        try:
-            hired_at = date.fromisoformat(hired_at_raw)
-        except Exception:
-            hired_at = None
+    hired_at = _parse_date(hired_at_raw)
 
     if not full_name:
         flash("Informe o nome do funcionário.", "warning")
@@ -266,9 +281,8 @@ def employee_add_salary(employee_id: int):
     eff_raw = (request.form.get("effective_from") or "").strip()
     base_raw = (request.form.get("base_salary") or "").strip()
 
-    try:
-        eff = date.fromisoformat(eff_raw)
-    except Exception:
+    eff = _parse_date(eff_raw)
+    if not eff:
         flash("Data de vigência inválida.", "warning")
         return redirect(url_for("payroll.employee_detail", employee_id=e.id))
 
@@ -439,9 +453,8 @@ def tax_inss_add():
     eff_raw = (request.form.get("effective_from") or "").strip()
     up_to_raw = (request.form.get("up_to") or "").strip()
     rate_raw = (request.form.get("rate") or "").strip()
-    try:
-        eff = date.fromisoformat(eff_raw)
-    except Exception:
+    eff = _parse_date(eff_raw)
+    if not eff:
         flash("Vigência inválida.", "warning")
         return redirect(url_for("payroll.tax_config"))
 
@@ -463,9 +476,8 @@ def tax_inss_add():
 def tax_irrf_config_set():
     eff_raw = (request.form.get("effective_from") or "").strip()
     dep_raw = (request.form.get("dependent_deduction") or "").strip()
-    try:
-        eff = date.fromisoformat(eff_raw)
-    except Exception:
+    eff = _parse_date(eff_raw)
+    if not eff:
         flash("Vigência inválida.", "warning")
         return redirect(url_for("payroll.tax_config"))
 
@@ -491,9 +503,8 @@ def tax_irrf_add():
     up_to_raw = (request.form.get("up_to") or "").strip()
     rate_raw = (request.form.get("rate") or "").strip()
     ded_raw = (request.form.get("deduction") or "").strip()
-    try:
-        eff = date.fromisoformat(eff_raw)
-    except Exception:
+    eff = _parse_date(eff_raw)
+    if not eff:
         flash("Vigência inválida.", "warning")
         return redirect(url_for("payroll.tax_config"))
 
@@ -617,12 +628,7 @@ def revenue_add():
         return redirect(url_for("payroll.revenue_home"))
 
     issued_at_raw = (request.form.get("issued_at") or "").strip()
-    issued_at = None
-    if issued_at_raw:
-        try:
-            issued_at = date.fromisoformat(issued_at_raw)
-        except Exception:
-            issued_at = None
+    issued_at = _parse_date(issued_at_raw)
 
     customer_name = (request.form.get("customer_name") or "").strip()
     description = (request.form.get("description") or "").strip()
@@ -718,18 +724,8 @@ def close_upload():
     due_date_raw = (request.form.get("due_date") or "").strip()
     paid_at_raw = (request.form.get("paid_at") or "").strip()
 
-    due_date = None
-    paid_at = None
-    if due_date_raw:
-        try:
-            due_date = date.fromisoformat(due_date_raw)
-        except Exception:
-            due_date = None
-    if paid_at_raw:
-        try:
-            paid_at = date.fromisoformat(paid_at_raw)
-        except Exception:
-            paid_at = None
+    due_date = _parse_date(due_date_raw)
+    paid_at = _parse_date(paid_at_raw)
 
     doc = GuideDocument.query.filter_by(year=year, month=month, doc_type=doc_type).first()
     if not doc:

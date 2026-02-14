@@ -17,7 +17,7 @@
         <form method="post" action="{{ url_for('payroll.employee_add_salary', employee_id=e.id) }}" class="row g-2 align-items-end mb-3">
           <div class="col-6">
             <label class="form-label" for="effective_from">Vigência a partir de</label>
-            <input class="form-control" type="date" id="effective_from" name="effective_from" required>
+            <input class="form-control js-date" type="text" id="effective_from" name="effective_from" placeholder="dd/mm/aaaa" inputmode="numeric" required>
           </div>
           <div class="col-6">
             <label class="form-label" for="base_salary">Salário base (R$)</label>
