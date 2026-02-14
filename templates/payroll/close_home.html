@@ -70,8 +70,8 @@
 
         {% if key == 'taxes' and item.meta %}
           <div class="small text-muted mb-3">
-            INSS: {{ item.meta.inss_eff or '—' }}<br>
-            IRRF: {{ item.meta.irrf_eff or '—' }}
+            INSS: {{ item.meta.inss_eff|fmt_date }}<br>
+            IRRF: {{ item.meta.irrf_eff|fmt_date }}
           </div>
         {% endif %}
 
@@ -137,8 +137,8 @@
           </div>
         </div>
         <div class="small text-muted text-end">
-          INSS: {{ summary.inss_eff.isoformat() if summary.inss_eff else '—' }}<br>
-          IRRF: {{ summary.irrf_eff.isoformat() if summary.irrf_eff else '—' }}
+          INSS: {{ summary.inss_eff|fmt_date }}<br>
+          IRRF: {{ summary.irrf_eff|fmt_date }}
         </div>
       </div>
     {% endif %}
@@ -163,8 +163,8 @@
             {% endif %}
           </div>
           <div class="small text-muted">Valor: {{ ('R$ %.2f'|format(doc.amount)) if doc.amount else '-' }}</div>
-          <div class="small text-muted">Vencimento: {{ doc.due_date.strftime('%d/%m/%Y') if doc.due_date else '-' }}</div>
-          <div class="small text-muted mb-3">Pago em: {{ doc.paid_at.strftime('%d/%m/%Y') if doc.paid_at else '-' }}</div>
+          <div class="small text-muted">Vencimento: {{ doc.due_date|fmt_date }}</div>
+          <div class="small text-muted mb-3">Pago em: {{ doc.paid_at|fmt_date }}</div>
         {% else %}
           <div class="text-muted small mb-3">Nenhum PDF anexado.</div>
         {% endif %}

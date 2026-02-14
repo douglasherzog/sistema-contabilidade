@@ -74,7 +74,7 @@
               {% endif %}
             </div>
             {% if inss_est is not none %}
-              <div class="small text-muted">Base: total bruto. Tabela usada (vigência): {{ inss_eff.strftime('%d/%m/%Y') if inss_eff else '-' }}.</div>
+              <div class="small text-muted">Base: total bruto. Tabela usada (vigência): {{ inss_eff|fmt_date }}.</div>
             {% else %}
               <div class="small text-muted">Para calcular: cadastre as faixas do INSS na tela de configuração.</div>
             {% endif %}
@@ -92,7 +92,7 @@
             {% if irrf_est is not none %}
               <div class="small text-muted">
                 Base: (bruto − INSS). Dedução por dependente: {{ ('R$ %.2f'|format(irrf_dep_ded)) if irrf_dep_ded is not none else '-' }}.
-                Tabela usada (vigência): {{ irrf_eff.strftime('%d/%m/%Y') if irrf_eff else '-' }}.
+                Tabela usada (vigência): {{ irrf_eff|fmt_date }}.
               </div>
             {% else %}
               <div class="small text-muted">Para calcular: cadastre a config + as faixas do IRRF na tela de configuração.</div>

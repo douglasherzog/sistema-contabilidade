@@ -556,8 +556,8 @@ def close_home():
             "action_url": url_for("payroll.tax_config"),
             "action_label": "Ver configurações",
             "meta": {
-                "inss_eff": (inss_eff.isoformat() if inss_eff else None),
-                "irrf_eff": (irrf_eff.isoformat() if irrf_eff else None),
+                "inss_eff": inss_eff,
+                "irrf_eff": irrf_eff,
             },
         },
         "guides": {

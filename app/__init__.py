@@ -1,5 +1,8 @@
 import os
 
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
+
 from flask import Flask, send_from_directory
 
 from .extensions import db, login_manager, migrate
@@ -33,6 +36,34 @@ def create_app() -> Flask:
     app.register_blueprint(payroll_bp)
 
     register_commands(app)
+
+    tz_sp = ZoneInfo("America/Sao_Paulo")
+
+    def _to_sp_dt(v: datetime) -> datetime:
+        dt = v
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(tz_sp)
+
+    @app.template_filter("fmt_date")
+    def fmt_date(v):
+        if not v:
+            return "—"
+        if isinstance(v, datetime):
+            return _to_sp_dt(v).strftime("%d/%m/%Y")
+        if isinstance(v, date):
+            return v.strftime("%d/%m/%Y")
+        return str(v)
+
+    @app.template_filter("fmt_dt")
+    def fmt_dt(v):
+        if not v:
+            return "—"
+        if isinstance(v, datetime):
+            return _to_sp_dt(v).strftime("%d/%m/%Y %H:%M")
+        if isinstance(v, date):
+            return v.strftime("%d/%m/%Y")
+        return str(v)
 
     media_guides_dir = os.path.join(app.instance_path, "media", "guides")
     os.makedirs(media_guides_dir, exist_ok=True)

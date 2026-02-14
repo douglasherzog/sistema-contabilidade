@@ -83,7 +83,7 @@
           <tbody>
             {% for n in notes %}
             <tr>
-              <td class="text-muted">{{ n.issued_at.strftime('%d/%m/%Y') if n.issued_at else '-' }}</td>
+              <td class="text-muted">{{ n.issued_at|fmt_date }}</td>
               <td>{{ n.customer_name or '-' }}</td>
               <td>{{ n.description or '-' }}</td>
               <td class="text-end"><strong>R$ {{ '%.2f'|format(n.amount or 0) }}</strong></td>
