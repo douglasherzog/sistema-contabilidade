@@ -20,6 +20,24 @@
   </div>
 </div>
 
+<div class="card mb-3 border-primary">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h2 class="h6 mb-0">Assistente IA do mês</h2>
+      <span class="badge text-bg-light border">Beta</span>
+    </div>
+    <div class="small text-muted mb-2">
+      Faça uma pergunta em linguagem simples. Exemplo: "o que eu devo fazer agora para fechar o mês sem erro?"
+    </div>
+    <textarea id="ai-question-guide" class="form-control mb-2" rows="3" placeholder="Digite sua pergunta..."></textarea>
+    <div class="d-flex gap-2 mb-2">
+      <button id="ai-ask-guide" class="btn btn-sm btn-primary" type="button">Perguntar à IA</button>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('payroll.help_page', slug='operacao_mensal_lavanderia') }}">Abrir tutorial</a>
+    </div>
+    <div id="ai-answer-guide" class="small text-muted">A resposta aparecerá aqui.</div>
+  </div>
+</div>
+
 <div class="card mb-3">
   <div class="card-body">
     <div class="d-flex justify-content-between align-items-center mb-2">
@@ -123,4 +141,48 @@
     <div class="small text-muted">Vigência fiscal: INSS {{ inss_eff|fmt_date }} · IRRF {{ irrf_eff|fmt_date }}</div>
   </div>
 </div>
+
+<script>
+  (function () {
+    const askBtn = document.getElementById('ai-ask-guide');
+    const questionEl = document.getElementById('ai-question-guide');
+    const answerEl = document.getElementById('ai-answer-guide');
+    const guideYear = Number.parseInt('{{ year }}', 10);
+    const guideMonth = Number.parseInt('{{ month }}', 10);
+    if (!askBtn || !questionEl || !answerEl) return;
+
+    askBtn.addEventListener('click', async function () {
+      const question = (questionEl.value || '').trim();
+      if (!question) {
+        answerEl.textContent = 'Digite uma pergunta para o assistente.';
+        return;
+      }
+
+      askBtn.disabled = true;
+      answerEl.textContent = 'Consultando assistente...';
+      try {
+        const response = await fetch("{{ url_for('payroll.ai_assistant') }}", {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source: 'monthly_guide',
+            year: guideYear,
+            month: guideMonth,
+            question: question
+          })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          answerEl.textContent = data.error || 'Não foi possível obter resposta agora.';
+          return;
+        }
+        answerEl.textContent = data.answer || 'Sem resposta.';
+      } catch (err) {
+        answerEl.textContent = 'Falha de conexão com o assistente. Tente novamente.';
+      } finally {
+        askBtn.disabled = false;
+      }
+    });
+  })();
+</script>
 {% endblock %}

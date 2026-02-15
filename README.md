@@ -86,6 +86,75 @@ Na tela `Fechamento` (`/payroll/close`) agora existem dois blocos novos:
   - Lista didática de obrigações com "por que importa" e botão de ação
   - Inclui guias da competência (DAS/FGTS/DARF) e lembrete de compliance-check antes do vencimento
 
+## Assistente IA na interface (Modo Guiado e Fechamento)
+
+O sistema possui um assistente IA em duas telas:
+
+- `Modo Guiado` (`/payroll/guide`)
+- `Fechamento` (`/payroll/close`)
+
+Se a chave de API não estiver configurada, o sistema continua funcionando e responde em **modo local de fallback** (sem chamada externa), priorizando ordem prática do checklist.
+
+### Rotina pronta para configurar variáveis (Windows/PowerShell)
+
+Foi adicionada a rotina:
+
+- `scripts/set_ai_env.ps1`
+
+Uso (define no `.env`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\set_ai_env.ps1 -ApiKey "SEU_TOKEN"
+```
+
+Opcional: também definir no processo atual do terminal (além do `.env`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\set_ai_env.ps1 -ApiKey "SEU_TOKEN" -AlsoSetProcessEnv
+```
+
+Opcional: usar outro arquivo de ambiente:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\set_ai_env.ps1 -ApiKey "SEU_TOKEN" -EnvFilePath ".env.local"
+```
+
+### Variáveis de ambiente
+
+- `AI_ASSISTANT_ENABLED` (padrão: `true`)
+- `AI_API_KEY` (obrigatória para IA externa)
+- `AI_API_URL` (padrão: `https://api.openai.com/v1/chat/completions`)
+- `AI_MODEL` (padrão: `gpt-4o-mini`)
+- `AI_TIMEOUT_SECONDS` (padrão: `25`)
+- `AI_KNOWLEDGE_ENABLED` (padrão: `false`)
+- `AI_KNOWLEDGE_REFRESH_HOURS` (padrão: `24`)
+- `AI_KNOWLEDGE_MAX_CHARS` (padrão: `12000`)
+- `AI_KNOWLEDGE_TOP_K` (padrão: `3`)
+- `AI_TRUSTED_SOURCES` (JSON ou lista separada por vírgula com URLs confiáveis)
+- `AI_KNOWLEDGE_STRICT_WHITELIST` (padrão: `true`)
+- `AI_KNOWLEDGE_ALLOWED_DOMAINS` (lista de domínios permitidos por vírgula)
+- `AI_KNOWLEDGE_MIN_TRUST_SCORE` (padrão: `70`, escala 0-100)
+
+### Aprendizado contínuo (RAG + experiência de uso)
+
+- Quando `AI_KNOWLEDGE_ENABLED=true`, o sistema atualiza periodicamente um cache local com conteúdos de fontes confiáveis (CLT/Receita/eSocial/gov.br).
+- O assistente usa esse cache como base externa (RAG) para melhorar respostas.
+- Governança v2 aplicada antes da resposta:
+  - whitelist estrita de domínio (quando ativada)
+  - score de confiabilidade por fonte
+  - revisão manual (approved/rejected/pending) na tela `Config IA`
+- Endpoint para atualização manual do conhecimento:
+  - `POST /payroll/ai/knowledge/refresh`
+- Endpoint para registrar revisão de fonte aprendida:
+  - `POST /payroll/ai/settings/knowledge/review`
+- O uso do assistente é registrado em `instance/ai_assistant_usage.jsonl` para análise e melhoria contínua dos prompts e do fluxo.
+
+### Segurança (recomendado)
+
+- Nunca commitar `AI_API_KEY` no repositório.
+- Definir chave apenas em ambiente (`.env` local ou variáveis do serviço).
+- Revisar periodicamente logs e timeouts de integração externa.
+
 Smoke (padrão já aponta para ambiente de testes):
 
 ```bash

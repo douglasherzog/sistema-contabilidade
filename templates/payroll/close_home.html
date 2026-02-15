@@ -6,6 +6,24 @@
     <div>
       <h1 class="h4 mb-1 lav-page-title">Fechamento</h1>
       <div class="small lav-subtitle">Checklist do mês para você conferir se está tudo pronto antes de pagar as guias e encerrar a competência.</div>
+
+<div class="card mb-3 border-primary">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h2 class="h6 mb-0">Assistente IA do fechamento</h2>
+      <span class="badge text-bg-light border">Beta</span>
+    </div>
+    <div class="small text-muted mb-2">
+      Pergunte em linguagem simples. Exemplo: "qual é a prioridade agora para eu fechar esse mês sem risco?"
+    </div>
+    <textarea id="ai-question-close" class="form-control mb-2" rows="3" placeholder="Digite sua pergunta..."></textarea>
+    <div class="d-flex gap-2 mb-2">
+      <button id="ai-ask-close" class="btn btn-sm btn-primary" type="button">Perguntar à IA</button>
+      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('payroll.help_page', slug='operacao_mensal_lavanderia') }}">Abrir tutorial</a>
+    </div>
+    <div id="ai-answer-close" class="small text-muted">A resposta aparecerá aqui.</div>
+  </div>
+</div>
     </div>
     <div class="d-flex gap-2">
       <a class="btn btn-primary btn-sm" href="{{ url_for('payroll.help_page', slug='operacao_mensal_lavanderia') }}">Tutorial mensal completo</a>
@@ -631,4 +649,48 @@
     {% endif %}
   </div>
 </div>
+
+<script>
+  (function () {
+    const askBtn = document.getElementById('ai-ask-close');
+    const questionEl = document.getElementById('ai-question-close');
+    const answerEl = document.getElementById('ai-answer-close');
+    const closeYear = Number.parseInt('{{ year }}', 10);
+    const closeMonth = Number.parseInt('{{ month }}', 10);
+    if (!askBtn || !questionEl || !answerEl) return;
+
+    askBtn.addEventListener('click', async function () {
+      const question = (questionEl.value || '').trim();
+      if (!question) {
+        answerEl.textContent = 'Digite uma pergunta para o assistente.';
+        return;
+      }
+
+      askBtn.disabled = true;
+      answerEl.textContent = 'Consultando assistente...';
+      try {
+        const response = await fetch("{{ url_for('payroll.ai_assistant') }}", {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            source: 'close_home',
+            year: closeYear,
+            month: closeMonth,
+            question: question
+          })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) {
+          answerEl.textContent = data.error || 'Não foi possível obter resposta agora.';
+          return;
+        }
+        answerEl.textContent = data.answer || 'Sem resposta.';
+      } catch (err) {
+        answerEl.textContent = 'Falha de conexão com o assistente. Tente novamente.';
+      } finally {
+        askBtn.disabled = false;
+      }
+    });
+  })();
+</script>
 {% endblock %}

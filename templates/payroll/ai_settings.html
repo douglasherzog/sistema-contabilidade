@@ -1,0 +1,291 @@
+{% extends 'base.html' %}
+{% block title %}Config IA - Sistema Contabilidade{% endblock %}
+{% block content %}
+<div class="lav-page-header">
+  <div class="lav-section-title">
+    <div>
+      <h1 class="h4 mb-1 lav-page-title">Configuração da IA</h1>
+      <div class="small lav-subtitle">Ajuste a IA do sistema com linguagem simples: API, modelo, atualização de conhecimento e fontes confiáveis.</div>
+    </div>
+    <div class="d-flex gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('payroll.help_page', slug='config_ia') }}">Tutorial desta tela</a>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ url_for('payroll.monthly_guide') }}">Voltar ao Modo Guiado</a>
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3 border-primary">
+  <div class="card-body">
+    <div class="small mb-1"><strong>Status atual:</strong>
+      {% if cfg.enabled %}
+        <span class="badge text-bg-success">Assistente ativo</span>
+      {% else %}
+        <span class="badge text-bg-secondary">Assistente desativado</span>
+      {% endif %}
+      {% if has_api_key %}
+        <span class="badge text-bg-success">API key configurada</span>
+      {% else %}
+        <span class="badge text-bg-warning">Sem API key (fallback local)</span>
+      {% endif %}
+      {% if cfg.knowledge_enabled %}
+        <span class="badge text-bg-info">Base externa ativa</span>
+      {% else %}
+        <span class="badge text-bg-light border">Base externa inativa</span>
+      {% endif %}
+    </div>
+    <div class="small text-muted">Persistência interna: configurações salvas em arquivo local do sistema (instance/ai_settings.json). Sobrescreve variáveis de ambiente para esta instalação.</div>
+    <div class="small text-muted">Chave da API nunca é exibida de volta na tela. Digite apenas quando quiser trocar.</div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h2 class="h6 mb-0">Relatório de auditoria da IA</h2>
+      <div class="small text-muted">Gerado em {{ audit_report.generated_at|fmt_dt }}</div>
+    </div>
+
+    <div class="row g-2 mb-3">
+      <div class="col-md-3"><span class="badge text-bg-success">Aprovadas: {{ audit_report.approved_count }}</span></div>
+      <div class="col-md-3"><span class="badge text-bg-danger">Rejeitadas: {{ audit_report.rejected_count }}</span></div>
+      <div class="col-md-3"><span class="badge text-bg-warning">Pendentes: {{ audit_report.pending_count }}</span></div>
+      <div class="col-md-3"><span class="badge text-bg-light border">Score médio aprovado: {{ audit_report.avg_score_approved if audit_report.avg_score_approved is not none else '-' }}</span></div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-6">
+        <div class="card h-100 border-success">
+          <div class="card-body">
+            <div class="fw-semibold mb-2">Últimas fontes aprovadas</div>
+            {% if audit_report.recent_approved %}
+              {% for src in audit_report.recent_approved %}
+                <div class="small mb-1">• {{ src.label or src.url }} <span class="text-muted">(score {{ src.trust_score or 0 }})</span></div>
+              {% endfor %}
+            {% else %}
+              <div class="small text-muted">Nenhuma aprovação registrada ainda.</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="col-lg-6">
+        <div class="card h-100 border-danger">
+          <div class="card-body">
+            <div class="fw-semibold mb-2">Últimas fontes rejeitadas</div>
+            {% if audit_report.recent_rejected %}
+              {% for src in audit_report.recent_rejected %}
+                <div class="small mb-1">• {{ src.label or src.url }} <span class="text-muted">(score {{ src.trust_score or 0 }})</span></div>
+              {% endfor %}
+            {% else %}
+              <div class="small text-muted">Nenhuma rejeição registrada recentemente.</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-3">
+      <div class="fw-semibold mb-2">Riscos atuais</div>
+      {% if audit_report.risks %}
+        {% for risk in audit_report.risks %}
+          <div class="small text-danger mb-1">• {{ risk }}</div>
+        {% endfor %}
+      {% else %}
+        <div class="small text-success">Sem riscos críticos no momento.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="post" action="{{ url_for('payroll.ai_settings_save') }}" class="row g-3">
+      <div class="col-12">
+        <h2 class="h6 mb-0">Conexão da IA</h2>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label" for="AI_ASSISTANT_ENABLED">AI_ASSISTANT_ENABLED</label>
+        <select class="form-select" id="AI_ASSISTANT_ENABLED" name="AI_ASSISTANT_ENABLED">
+          <option value="true" {% if form_values.AI_ASSISTANT_ENABLED == 'true' %}selected{% endif %}>true (ativado)</option>
+          <option value="false" {% if form_values.AI_ASSISTANT_ENABLED == 'false' %}selected{% endif %}>false (desativado)</option>
+        </select>
+        <div class="small text-muted">Liga/desliga o assistente nas telas.</div>
+      </div>
+
+      <div class="col-md-8">
+        <label class="form-label" for="AI_API_KEY">AI_API_KEY</label>
+        <input type="password" class="form-control" id="AI_API_KEY" name="AI_API_KEY" placeholder="Digite uma nova chave para atualizar">
+        <div class="small text-muted">Deixe em branco para manter a chave atual.</div>
+        <div class="form-check mt-1">
+          <input class="form-check-input" type="checkbox" id="keep_existing_key" name="keep_existing_key" value="1" checked>
+          <label class="form-check-label small" for="keep_existing_key">Manter chave atual quando campo acima estiver vazio</label>
+        </div>
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label" for="AI_API_URL">AI_API_URL</label>
+        <input class="form-control" id="AI_API_URL" name="AI_API_URL" value="{{ form_values.AI_API_URL }}">
+        <div class="small text-muted">Endpoint do provedor (OpenAI-compatible).</div>
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label" for="AI_MODEL">AI_MODEL</label>
+        <input class="form-control" id="AI_MODEL" name="AI_MODEL" value="{{ form_values.AI_MODEL }}">
+        <div class="small text-muted">Ex.: gpt-4o-mini</div>
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label" for="AI_TIMEOUT_SECONDS">AI_TIMEOUT_SECONDS</label>
+        <input class="form-control" id="AI_TIMEOUT_SECONDS" name="AI_TIMEOUT_SECONDS" value="{{ form_values.AI_TIMEOUT_SECONDS }}">
+        <div class="small text-muted">Tempo máximo de espera.</div>
+      </div>
+
+      <div class="col-12 mt-2">
+        <h2 class="h6 mb-0">Conhecimento externo (RAG)</h2>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label" for="AI_KNOWLEDGE_ENABLED">AI_KNOWLEDGE_ENABLED</label>
+        <select class="form-select" id="AI_KNOWLEDGE_ENABLED" name="AI_KNOWLEDGE_ENABLED">
+          <option value="true" {% if form_values.AI_KNOWLEDGE_ENABLED == 'true' %}selected{% endif %}>true (ativado)</option>
+          <option value="false" {% if form_values.AI_KNOWLEDGE_ENABLED == 'false' %}selected{% endif %}>false (desativado)</option>
+        </select>
+        <div class="small text-muted">Permite autoalimentação em fontes confiáveis.</div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label" for="AI_KNOWLEDGE_REFRESH_HOURS">AI_KNOWLEDGE_REFRESH_HOURS</label>
+        <input class="form-control" id="AI_KNOWLEDGE_REFRESH_HOURS" name="AI_KNOWLEDGE_REFRESH_HOURS" value="{{ form_values.AI_KNOWLEDGE_REFRESH_HOURS }}">
+        <div class="small text-muted">Intervalo de atualização das fontes.</div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label" for="AI_KNOWLEDGE_TOP_K">AI_KNOWLEDGE_TOP_K</label>
+        <input class="form-control" id="AI_KNOWLEDGE_TOP_K" name="AI_KNOWLEDGE_TOP_K" value="{{ form_values.AI_KNOWLEDGE_TOP_K }}">
+        <div class="small text-muted">Quantas fontes relevantes usar por pergunta.</div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label" for="AI_KNOWLEDGE_MAX_CHARS">AI_KNOWLEDGE_MAX_CHARS</label>
+        <input class="form-control" id="AI_KNOWLEDGE_MAX_CHARS" name="AI_KNOWLEDGE_MAX_CHARS" value="{{ form_values.AI_KNOWLEDGE_MAX_CHARS }}">
+        <div class="small text-muted">Limite de texto por fonte coletada.</div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label" for="AI_KNOWLEDGE_STRICT_WHITELIST">AI_KNOWLEDGE_STRICT_WHITELIST</label>
+        <select class="form-select" id="AI_KNOWLEDGE_STRICT_WHITELIST" name="AI_KNOWLEDGE_STRICT_WHITELIST">
+          <option value="true" {% if form_values.AI_KNOWLEDGE_STRICT_WHITELIST == 'true' %}selected{% endif %}>true (bloquear domínios fora da whitelist)</option>
+          <option value="false" {% if form_values.AI_KNOWLEDGE_STRICT_WHITELIST == 'false' %}selected{% endif %}>false (permitir domínios fora da whitelist)</option>
+        </select>
+        <div class="small text-muted">Quando ativo, só aprende de domínios permitidos.</div>
+      </div>
+
+      <div class="col-md-4">
+        <label class="form-label" for="AI_KNOWLEDGE_MIN_TRUST_SCORE">AI_KNOWLEDGE_MIN_TRUST_SCORE</label>
+        <input class="form-control" id="AI_KNOWLEDGE_MIN_TRUST_SCORE" name="AI_KNOWLEDGE_MIN_TRUST_SCORE" value="{{ form_values.AI_KNOWLEDGE_MIN_TRUST_SCORE }}">
+        <div class="small text-muted">Score mínimo (0-100) para fonte influenciar resposta.</div>
+      </div>
+
+      <div class="col-12">
+        <label class="form-label" for="AI_KNOWLEDGE_ALLOWED_DOMAINS">AI_KNOWLEDGE_ALLOWED_DOMAINS</label>
+        <input class="form-control" id="AI_KNOWLEDGE_ALLOWED_DOMAINS" name="AI_KNOWLEDGE_ALLOWED_DOMAINS" value="{{ form_values.AI_KNOWLEDGE_ALLOWED_DOMAINS }}" placeholder="ex.: gov.br, planalto.gov.br, receita.fazenda.gov.br">
+        <div class="small text-muted">Lista de domínios permitidos separada por vírgula.</div>
+      </div>
+
+      <div class="col-12">
+        <label class="form-label" for="AI_TRUSTED_SOURCES">AI_TRUSTED_SOURCES</label>
+        <textarea class="form-control" id="AI_TRUSTED_SOURCES" name="AI_TRUSTED_SOURCES" rows="5">{{ form_values.AI_TRUSTED_SOURCES }}</textarea>
+        <div class="small text-muted">Use JSON: [{"label":"CLT","url":"https://..."}]</div>
+      </div>
+
+      <div class="col-12 d-flex gap-2">
+        <button class="btn btn-primary" type="submit">Salvar configurações</button>
+        <a class="btn btn-outline-secondary" href="{{ url_for('payroll.help_page', slug='config_ia') }}">Ver explicação detalhada</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body d-flex flex-wrap gap-2 align-items-center">
+    <form method="post" action="{{ url_for('payroll.ai_settings_refresh_knowledge') }}">
+      <button class="btn btn-outline-primary" type="submit">Atualizar conhecimento agora</button>
+    </form>
+    <div class="small text-muted">Sobrescritas locais salvas: {{ overrides_count }}</div>
+  </div>
+</div>
+
+<div class="card mt-3">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h2 class="h6 mb-0">Governança v2: revisão do que foi aprendido</h2>
+      <div class="small text-muted">Somente fontes aprovadas e com score mínimo entram no RAG</div>
+    </div>
+    <div class="d-flex flex-wrap gap-2 mb-3">
+      <span class="badge text-bg-warning">Pendentes: {{ review_counts.pending_review }}</span>
+      <span class="badge text-bg-success">Aprovadas: {{ review_counts.approved }}</span>
+      <span class="badge text-bg-danger">Rejeitadas: {{ review_counts.rejected }}</span>
+      <span class="badge text-bg-secondary">Bloqueadas por domínio: {{ review_counts.blocked_domain }}</span>
+    </div>
+    <div class="small text-muted mb-3">Whitelist atual: {{ allowed_domains|join(', ') if allowed_domains else 'inferida automaticamente pelas fontes configuradas' }}</div>
+
+    {% if reviewed_sources %}
+      <div class="table-responsive">
+        <table class="table table-sm align-middle">
+          <thead>
+            <tr>
+              <th>Fonte</th>
+              <th>Domínio</th>
+              <th>Score</th>
+              <th>Status</th>
+              <th>Revisão</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for src in reviewed_sources %}
+            <tr>
+              <td>
+                <div class="fw-semibold small">{{ src.label or src.url }}</div>
+                <div class="small text-muted">{{ src.url }}</div>
+              </td>
+              <td class="small text-muted">{{ src.domain or '-' }}</td>
+              <td><span class="badge text-bg-light border">{{ src.trust_score or 0 }}</span></td>
+              <td>
+                {% set st = src.review_status or 'pending_review' %}
+                {% if st == 'approved' %}
+                  <span class="badge text-bg-success">approved</span>
+                {% elif st == 'rejected' %}
+                  <span class="badge text-bg-danger">rejected</span>
+                {% elif st == 'blocked_domain' %}
+                  <span class="badge text-bg-secondary">blocked_domain</span>
+                {% else %}
+                  <span class="badge text-bg-warning">pending_review</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if (src.review_status or '') == 'blocked_domain' %}
+                  <div class="small text-muted">Bloqueada pela whitelist.</div>
+                {% else %}
+                  <form method="post" action="{{ url_for('payroll.ai_settings_review_source') }}" class="d-flex flex-column gap-1">
+                    <input type="hidden" name="source_url" value="{{ src.url }}">
+                    <select class="form-select form-select-sm" name="decision" aria-label="Decisão de revisão da fonte">
+                      <option value="pending_review" {% if (src.review_status or 'pending_review') == 'pending_review' %}selected{% endif %}>pending_review</option>
+                      <option value="approved" {% if (src.review_status or '') == 'approved' %}selected{% endif %}>approved</option>
+                      <option value="rejected" {% if (src.review_status or '') == 'rejected' %}selected{% endif %}>rejected</option>
+                    </select>
+                    <input class="form-control form-control-sm" name="review_note" value="{{ src.review_note or '' }}" placeholder="Motivo da revisão (opcional)">
+                    <button class="btn btn-sm btn-outline-primary" type="submit">Salvar revisão</button>
+                  </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <div class="small text-muted">Nenhuma fonte coletada ainda. Clique em “Atualizar conhecimento agora”.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

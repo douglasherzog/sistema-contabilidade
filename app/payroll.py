@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import os
+import json
+import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from urllib.parse import urlparse
 from xml.sax.saxutils import escape as xml_escape
 
-from flask import Blueprint, current_app, flash, redirect, render_template, request, session, url_for
+import requests
+from bs4 import BeautifulSoup
+from flask import Blueprint, current_app, flash, jsonify, redirect, render_template, request, session, url_for
 from flask_login import current_user, login_required
 from lxml import etree
 from werkzeug.utils import secure_filename
@@ -38,6 +43,31 @@ payroll_bp = Blueprint("payroll", __name__, url_prefix="/payroll")
 
 
 TUTORIALS: dict[str, dict] = {
+    "config_ia": {
+        "title": "Configuração da IA (API e conhecimento)",
+        "goal": "Configurar a IA com segurança, entender cada variável e manter o assistente atualizado com fontes confiáveis.",
+        "first_step": "Abra Config IA, valide se a IA está habilitada e configure a chave da API (AI_API_KEY).",
+        "fields": [
+            {"name": "AI_ASSISTANT_ENABLED", "explain": "Liga/desliga o assistente da IA nas telas do sistema."},
+            {"name": "AI_API_KEY", "explain": "Chave da API externa. Nunca compartilhe nem publique no git."},
+            {"name": "AI_API_URL", "explain": "URL do provedor da IA (padrão compatível com OpenAI)."},
+            {"name": "AI_MODEL", "explain": "Modelo que responderá as perguntas (ex.: gpt-4o-mini)."},
+            {"name": "AI_TIMEOUT_SECONDS", "explain": "Tempo máximo de espera da resposta da IA."},
+            {"name": "AI_KNOWLEDGE_ENABLED", "explain": "Permite ingestão de fontes externas confiáveis (RAG)."},
+            {"name": "AI_TRUSTED_SOURCES", "explain": "Lista de URLs confiáveis para aprendizado externo da IA."},
+            {"name": "AI_KNOWLEDGE_STRICT_WHITELIST", "explain": "Quando ativo, bloqueia qualquer domínio fora da whitelist."},
+            {"name": "AI_KNOWLEDGE_ALLOWED_DOMAINS", "explain": "Domínios permitidos para autoaprendizado (ex.: gov.br, planalto.gov.br)."},
+            {"name": "AI_KNOWLEDGE_MIN_TRUST_SCORE", "explain": "Score mínimo da fonte para ela influenciar resposta da IA."},
+        ],
+        "steps": [
+            "Ative o assistente e configure a chave de API.",
+            "Defina modelo, URL e timeout conforme seu provedor.",
+            "Ative a base de conhecimento e configure fontes confiáveis.",
+            "Ajuste whitelist, score mínimo e revise fontes no painel de governança v2.",
+            "Clique em atualizar conhecimento para buscar conteúdos externos.",
+            "Teste no Modo Guiado/Fechamento e ajuste as configurações se necessário.",
+        ],
+    },
     "operacao_mensal_lavanderia": {
         "title": "Operação mensal da lavanderia (passo a passo)",
         "goal": "Executar todo mês sem esquecer etapas críticas: folha, guias, pagamento e fechamento.",
@@ -331,6 +361,843 @@ def help_page(slug: str):
         flash("Tutorial não encontrado.", "warning")
         return redirect(url_for("payroll.help_index"))
     return render_template("payroll/help_page.html", slug=slug, item=item)
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on", "sim"}
+
+
+def _ai_assistant_config() -> dict[str, object]:
+    overrides = _load_ai_settings_overrides()
+
+    def _resolve(name: str, default: str = "") -> str:
+        raw = overrides.get(name)
+        if raw is None:
+            return (os.getenv(name) or default).strip()
+        return str(raw).strip()
+
+    def _resolve_bool(name: str, default: bool = False) -> bool:
+        raw = overrides.get(name)
+        if raw is None:
+            return _env_flag(name, default)
+        return str(raw).strip().lower() in {"1", "true", "yes", "y", "on", "sim"}
+
+    def _resolve_int(name: str, default: int) -> int:
+        raw = overrides.get(name)
+        if raw is None:
+            raw = os.getenv(name)
+        try:
+            return int(str(raw).strip())
+        except Exception:
+            return int(default)
+
+    api_key = _resolve("AI_API_KEY", "")
+    return {
+        "enabled": _resolve_bool("AI_ASSISTANT_ENABLED", True),
+        "api_key": api_key,
+        "has_key": bool(api_key),
+        "api_url": _resolve("AI_API_URL", "https://api.openai.com/v1/chat/completions"),
+        "model": _resolve("AI_MODEL", "gpt-4o-mini"),
+        "timeout_seconds": _resolve_int("AI_TIMEOUT_SECONDS", 25),
+        "knowledge_enabled": _resolve_bool("AI_KNOWLEDGE_ENABLED", False),
+        "knowledge_refresh_hours": _resolve_int("AI_KNOWLEDGE_REFRESH_HOURS", 24),
+        "knowledge_max_chars": _resolve_int("AI_KNOWLEDGE_MAX_CHARS", 12000),
+        "knowledge_top_k": _resolve_int("AI_KNOWLEDGE_TOP_K", 3),
+        "knowledge_sources": _parse_ai_sources(_resolve("AI_TRUSTED_SOURCES", "")),
+        "knowledge_strict_whitelist": _resolve_bool("AI_KNOWLEDGE_STRICT_WHITELIST", True),
+        "knowledge_allowed_domains": _parse_domain_list(_resolve("AI_KNOWLEDGE_ALLOWED_DOMAINS", "")),
+        "knowledge_min_trust_score": _resolve_int("AI_KNOWLEDGE_MIN_TRUST_SCORE", 70),
+        "settings_overrides": overrides,
+    }
+
+
+def _ai_settings_file() -> str:
+    os.makedirs(current_app.instance_path, exist_ok=True)
+    return os.path.join(current_app.instance_path, "ai_settings.json")
+
+
+def _load_ai_settings_overrides() -> dict[str, str]:
+    path = _ai_settings_file()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            if isinstance(data, dict):
+                out: dict[str, str] = {}
+                for key, value in data.items():
+                    if isinstance(key, str):
+                        out[key] = "" if value is None else str(value)
+                return out
+    except Exception as exc:
+        current_app.logger.warning("Falha ao ler configurações de IA: %s", exc)
+    return {}
+
+
+def _save_ai_settings_overrides(values: dict[str, str]) -> None:
+    path = _ai_settings_file()
+    payload = {k: v for k, v in values.items() if v is not None and str(v).strip() != ""}
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+
+
+def _current_ai_settings_form_values(cfg: dict[str, object]) -> dict[str, str]:
+    sources_raw = json.dumps(list(cfg.get("knowledge_sources") or []), ensure_ascii=False)
+    return {
+        "AI_ASSISTANT_ENABLED": "true" if cfg.get("enabled") else "false",
+        "AI_API_KEY": "",
+        "AI_API_URL": str(cfg.get("api_url") or ""),
+        "AI_MODEL": str(cfg.get("model") or ""),
+        "AI_TIMEOUT_SECONDS": str(cfg.get("timeout_seconds") or "25"),
+        "AI_KNOWLEDGE_ENABLED": "true" if cfg.get("knowledge_enabled") else "false",
+        "AI_KNOWLEDGE_REFRESH_HOURS": str(cfg.get("knowledge_refresh_hours") or "24"),
+        "AI_KNOWLEDGE_MAX_CHARS": str(cfg.get("knowledge_max_chars") or "12000"),
+        "AI_KNOWLEDGE_TOP_K": str(cfg.get("knowledge_top_k") or "3"),
+        "AI_TRUSTED_SOURCES": sources_raw,
+        "AI_KNOWLEDGE_STRICT_WHITELIST": "true" if cfg.get("knowledge_strict_whitelist") else "false",
+        "AI_KNOWLEDGE_ALLOWED_DOMAINS": ", ".join(list(cfg.get("knowledge_allowed_domains") or [])),
+        "AI_KNOWLEDGE_MIN_TRUST_SCORE": str(cfg.get("knowledge_min_trust_score") or "70"),
+    }
+
+
+def _default_ai_sources() -> list[dict[str, str]]:
+    return [
+        {
+            "label": "CLT consolidada (Planalto)",
+            "url": "https://www.planalto.gov.br/ccivil_03/decreto-lei/del5452.htm",
+        },
+        {
+            "label": "Receita Federal (assuntos tributários)",
+            "url": "https://www.gov.br/receitafederal/pt-br/assuntos",
+        },
+        {
+            "label": "eSocial (documentação)",
+            "url": "https://www.gov.br/esocial/pt-br/documentacao-tecnica",
+        },
+        {
+            "label": "Portal Gov.br - Trabalho e Emprego",
+            "url": "https://www.gov.br/trabalho-e-emprego/pt-br",
+        },
+    ]
+
+
+def _parse_ai_sources(raw: str) -> list[dict[str, str]]:
+    value = (raw or "").strip()
+    if not value:
+        return _default_ai_sources()
+
+    # Aceita JSON ([{"label":"...","url":"..."}]) ou lista separada por vírgula.
+    try:
+        parsed = json.loads(value)
+        if isinstance(parsed, list):
+            rows = []
+            for item in parsed:
+                if isinstance(item, dict) and item.get("url"):
+                    rows.append({
+                        "label": str(item.get("label") or item.get("url")).strip(),
+                        "url": str(item.get("url") or "").strip(),
+                    })
+            if rows:
+                return rows
+    except Exception:
+        pass
+
+    rows = []
+    for url in value.split(","):
+        u = url.strip()
+        if u:
+            rows.append({"label": u, "url": u})
+    return rows or _default_ai_sources()
+
+
+def _parse_domain_list(raw: str) -> list[str]:
+    value = (raw or "").strip()
+    if not value:
+        return []
+    out: list[str] = []
+    for chunk in value.split(","):
+        d = chunk.strip().lower()
+        if d:
+            out.append(d)
+    return out
+
+
+def _domain_from_url(url: str) -> str:
+    try:
+        parsed = urlparse(url)
+        return (parsed.hostname or "").strip().lower()
+    except Exception:
+        return ""
+
+
+def _matches_allowed_domain(domain: str, allowed_domains: set[str]) -> bool:
+    if not domain:
+        return False
+    if domain in allowed_domains:
+        return True
+    return any(domain.endswith(f".{allowed}") for allowed in allowed_domains)
+
+
+def _effective_allowed_domains(cfg: dict[str, object]) -> set[str]:
+    configured = {str(d).strip().lower() for d in list(cfg.get("knowledge_allowed_domains") or []) if str(d).strip()}
+    if configured:
+        return configured
+    inferred = set()
+    for src in list(cfg.get("knowledge_sources") or []):
+        domain = _domain_from_url(str((src or {}).get("url") or ""))
+        if domain:
+            inferred.add(domain)
+    return inferred
+
+
+def _trust_score_for_source(domain: str, url: str) -> int:
+    score = 30
+    if url.lower().startswith("https://"):
+        score += 10
+    if domain.endswith("gov.br"):
+        score += 25
+    if "planalto.gov.br" in domain:
+        score += 20
+    if "receitafederal" in domain or "esocial" in domain:
+        score += 15
+    return max(0, min(100, score))
+
+
+def _load_source_reviews(cache: dict[str, object]) -> dict[str, dict[str, object]]:
+    rows: dict[str, dict[str, object]] = {}
+    for src in list(cache.get("sources") or []):
+        url = str(src.get("url") or "").strip()
+        if url:
+            rows[url] = {
+                "review_status": str(src.get("review_status") or "pending_review"),
+                "review_note": str(src.get("review_note") or ""),
+                "reviewed_at": src.get("reviewed_at"),
+                "reviewed_by": src.get("reviewed_by"),
+            }
+    return rows
+
+
+def _parse_iso_dt(value: object) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except Exception:
+        return None
+
+
+def _build_ai_audit_report(cfg: dict[str, object], reviewed_sources: list[dict[str, object]]) -> dict[str, object]:
+    approved = [s for s in reviewed_sources if str(s.get("review_status") or "") == "approved"]
+    rejected = [s for s in reviewed_sources if str(s.get("review_status") or "") == "rejected"]
+    pending = [s for s in reviewed_sources if str(s.get("review_status") or "pending_review") == "pending_review"]
+    blocked = [s for s in reviewed_sources if str(s.get("review_status") or "") == "blocked_domain"]
+
+    approved_scores = [int(s.get("trust_score") or 0) for s in approved]
+    avg_score_approved = round(sum(approved_scores) / len(approved_scores), 1) if approved_scores else None
+
+    def _recent(rows: list[dict[str, object]], limit: int = 5) -> list[dict[str, object]]:
+        ordered = sorted(rows, key=lambda item: _parse_iso_dt(item.get("reviewed_at")) or datetime.min, reverse=True)
+        return ordered[:limit]
+
+    risks: list[str] = []
+    if not cfg.get("knowledge_enabled"):
+        risks.append("Base externa da IA está desativada; respostas não usam conteúdo confiável atualizado.")
+    if not cfg.get("knowledge_strict_whitelist"):
+        risks.append("Whitelist estrita está desativada; domínios fora da lista podem entrar no conhecimento.")
+    if not list(cfg.get("knowledge_allowed_domains") or []):
+        risks.append("Nenhum domínio permitido explicitamente configurado; revise AI_KNOWLEDGE_ALLOWED_DOMAINS.")
+    if pending:
+        risks.append(f"Existem {len(pending)} fonte(s) pendente(s) de revisão manual.")
+    if blocked:
+        risks.append(f"Existem {len(blocked)} fonte(s) bloqueada(s) por domínio; valide a whitelist.")
+    if avg_score_approved is not None and avg_score_approved < int(cfg.get("knowledge_min_trust_score") or 70):
+        risks.append("Score médio das fontes aprovadas está abaixo do mínimo configurado.")
+    if not approved:
+        risks.append("Nenhuma fonte aprovada até o momento; o RAG não terá base validada.")
+
+    return {
+        "generated_at": datetime.now().isoformat(),
+        "avg_score_approved": avg_score_approved,
+        "approved_count": len(approved),
+        "rejected_count": len(rejected),
+        "pending_count": len(pending),
+        "blocked_count": len(blocked),
+        "recent_approved": _recent(approved),
+        "recent_rejected": _recent(rejected),
+        "risks": risks,
+    }
+
+
+def _ai_cache_file() -> str:
+    os.makedirs(current_app.instance_path, exist_ok=True)
+    return os.path.join(current_app.instance_path, "ai_knowledge_cache.json")
+
+
+def _ai_usage_log_file() -> str:
+    os.makedirs(current_app.instance_path, exist_ok=True)
+    return os.path.join(current_app.instance_path, "ai_assistant_usage.jsonl")
+
+
+def _load_ai_knowledge_cache() -> dict[str, object]:
+    path = _ai_cache_file()
+    if not os.path.exists(path):
+        return {"updated_at": None, "sources": []}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            if isinstance(data, dict):
+                return data
+    except Exception as exc:
+        current_app.logger.warning("Falha ao ler cache de conhecimento IA: %s", exc)
+    return {"updated_at": None, "sources": []}
+
+
+def _save_ai_knowledge_cache(cache: dict[str, object]) -> None:
+    path = _ai_cache_file()
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(cache, fh, ensure_ascii=False, indent=2)
+    except Exception as exc:
+        current_app.logger.warning("Falha ao salvar cache de conhecimento IA: %s", exc)
+
+
+def _fetch_page_text(url: str, timeout_seconds: int, max_chars: int) -> str:
+    resp = requests.get(url, timeout=timeout_seconds)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, "lxml")
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+    text = " ".join((soup.get_text(" ", strip=True) or "").split())
+    if len(text) > max_chars:
+        text = text[:max_chars]
+    return text
+
+
+def _refresh_ai_knowledge_cache(cfg: dict[str, object], *, force: bool = False) -> tuple[dict[str, object], list[str]]:
+    cache = _load_ai_knowledge_cache()
+    warnings: list[str] = []
+    now = datetime.now()
+
+    if not force:
+        updated_at_raw = str(cache.get("updated_at") or "").strip()
+        if updated_at_raw:
+            try:
+                updated_at = datetime.fromisoformat(updated_at_raw)
+                hours = int(cfg.get("knowledge_refresh_hours") or 24)
+                if (now - updated_at).total_seconds() < (hours * 3600):
+                    return cache, warnings
+            except Exception:
+                pass
+
+    sources = list(cfg.get("knowledge_sources") or [])
+    if not sources:
+        return cache, ["Sem fontes configuradas para atualização de conhecimento."]
+
+    fetched: list[dict[str, object]] = []
+    previous_reviews = _load_source_reviews(cache)
+    allowed_domains = _effective_allowed_domains(cfg)
+    strict_whitelist = bool(cfg.get("knowledge_strict_whitelist"))
+    timeout_seconds = int(cfg.get("timeout_seconds") or 25)
+    max_chars = int(cfg.get("knowledge_max_chars") or 12000)
+    for source in sources:
+        url = str((source or {}).get("url") or "").strip()
+        label = str((source or {}).get("label") or url).strip()
+        if not url:
+            continue
+        domain = _domain_from_url(url)
+        trust_score = _trust_score_for_source(domain=domain, url=url)
+        review_data = previous_reviews.get(url, {})
+        is_allowed = _matches_allowed_domain(domain, allowed_domains) if allowed_domains else True
+        if strict_whitelist and not is_allowed:
+            warnings.append(f"Fonte bloqueada por whitelist: {label} ({domain or 'domínio inválido'})")
+            fetched.append(
+                {
+                    "label": label,
+                    "url": url,
+                    "domain": domain,
+                    "trust_score": trust_score,
+                    "fetched_at": now.isoformat(),
+                    "content": "",
+                    "review_status": "blocked_domain",
+                    "review_note": "Bloqueada por whitelist estrita de domínios.",
+                    "reviewed_at": now.isoformat(),
+                    "reviewed_by": "system",
+                }
+            )
+            continue
+
+        try:
+            text = _fetch_page_text(url=url, timeout_seconds=timeout_seconds, max_chars=max_chars)
+            if not text:
+                warnings.append(f"Fonte sem conteúdo útil: {label}")
+                continue
+            fetched.append(
+                {
+                    "label": label,
+                    "url": url,
+                    "domain": domain,
+                    "trust_score": trust_score,
+                    "fetched_at": now.isoformat(),
+                    "content": text,
+                    "review_status": str(review_data.get("review_status") or "pending_review"),
+                    "review_note": str(review_data.get("review_note") or ""),
+                    "reviewed_at": review_data.get("reviewed_at"),
+                    "reviewed_by": review_data.get("reviewed_by"),
+                }
+            )
+        except Exception as exc:
+            warnings.append(f"Falha ao coletar fonte '{label}': {exc}")
+
+    if fetched:
+        cache = {
+            "updated_at": now.isoformat(),
+            "sources": fetched,
+        }
+        _save_ai_knowledge_cache(cache)
+    return cache, warnings
+
+
+@payroll_bp.get("/ai/settings")
+@login_required
+def ai_settings_page():
+    cfg = _ai_assistant_config()
+    form_values = _current_ai_settings_form_values(cfg)
+    cache = _load_ai_knowledge_cache()
+    reviewed_sources = list(cache.get("sources") or [])
+    reviewed_sources.sort(key=lambda src: str(src.get("label") or src.get("url") or "").lower())
+    review_counts = {
+        "pending_review": sum(1 for s in reviewed_sources if str(s.get("review_status") or "pending_review") == "pending_review"),
+        "approved": sum(1 for s in reviewed_sources if str(s.get("review_status") or "") == "approved"),
+        "rejected": sum(1 for s in reviewed_sources if str(s.get("review_status") or "") == "rejected"),
+        "blocked_domain": sum(1 for s in reviewed_sources if str(s.get("review_status") or "") == "blocked_domain"),
+    }
+    audit_report = _build_ai_audit_report(cfg=cfg, reviewed_sources=reviewed_sources)
+    return render_template(
+        "payroll/ai_settings.html",
+        cfg=cfg,
+        form_values=form_values,
+        has_api_key=bool(cfg.get("has_key")),
+        overrides_count=len(dict(cfg.get("settings_overrides") or {})),
+        reviewed_sources=reviewed_sources,
+        review_counts=review_counts,
+        allowed_domains=sorted(_effective_allowed_domains(cfg)),
+        audit_report=audit_report,
+    )
+
+
+@payroll_bp.post("/ai/settings")
+@login_required
+def ai_settings_save():
+    api_key_input = (request.form.get("AI_API_KEY") or "").strip()
+    keep_existing_key = (request.form.get("keep_existing_key") or "").strip() == "1"
+    if not api_key_input and not keep_existing_key:
+        flash("Para remover a chave da IA, salve um novo valor ou mantenha a opção de preservar chave ativa.", "warning")
+        return redirect(url_for("payroll.ai_settings_page"))
+
+    overrides = _load_ai_settings_overrides()
+    updates = {
+        "AI_ASSISTANT_ENABLED": "true" if (request.form.get("AI_ASSISTANT_ENABLED") or "").strip() in {"1", "true", "on", "sim"} else "false",
+        "AI_API_URL": (request.form.get("AI_API_URL") or "").strip(),
+        "AI_MODEL": (request.form.get("AI_MODEL") or "").strip(),
+        "AI_TIMEOUT_SECONDS": (request.form.get("AI_TIMEOUT_SECONDS") or "25").strip(),
+        "AI_KNOWLEDGE_ENABLED": "true" if (request.form.get("AI_KNOWLEDGE_ENABLED") or "").strip() in {"1", "true", "on", "sim"} else "false",
+        "AI_KNOWLEDGE_REFRESH_HOURS": (request.form.get("AI_KNOWLEDGE_REFRESH_HOURS") or "24").strip(),
+        "AI_KNOWLEDGE_MAX_CHARS": (request.form.get("AI_KNOWLEDGE_MAX_CHARS") or "12000").strip(),
+        "AI_KNOWLEDGE_TOP_K": (request.form.get("AI_KNOWLEDGE_TOP_K") or "3").strip(),
+        "AI_TRUSTED_SOURCES": (request.form.get("AI_TRUSTED_SOURCES") or "").strip(),
+        "AI_KNOWLEDGE_STRICT_WHITELIST": "true" if (request.form.get("AI_KNOWLEDGE_STRICT_WHITELIST") or "").strip() in {"1", "true", "on", "sim"} else "false",
+        "AI_KNOWLEDGE_ALLOWED_DOMAINS": (request.form.get("AI_KNOWLEDGE_ALLOWED_DOMAINS") or "").strip(),
+        "AI_KNOWLEDGE_MIN_TRUST_SCORE": (request.form.get("AI_KNOWLEDGE_MIN_TRUST_SCORE") or "70").strip(),
+    }
+
+    if api_key_input:
+        updates["AI_API_KEY"] = api_key_input
+    elif keep_existing_key and overrides.get("AI_API_KEY"):
+        updates["AI_API_KEY"] = str(overrides.get("AI_API_KEY") or "")
+
+    _save_ai_settings_overrides(updates)
+    flash("Configurações da IA salvas. Elas ficam persistidas no arquivo de instância do sistema.", "success")
+    return redirect(url_for("payroll.ai_settings_page"))
+
+
+@payroll_bp.post("/ai/settings/refresh-knowledge")
+@login_required
+def ai_settings_refresh_knowledge():
+    cfg = _ai_assistant_config()
+    if not cfg.get("knowledge_enabled"):
+        flash("Ative a base de conhecimento da IA para atualizar fontes externas.", "warning")
+        return redirect(url_for("payroll.ai_settings_page"))
+
+    cache, warnings = _refresh_ai_knowledge_cache(cfg, force=True)
+    if warnings:
+        flash(f"Conhecimento atualizado com avisos: {' | '.join(warnings[:3])}", "warning")
+    else:
+        flash(f"Conhecimento IA atualizado com sucesso em {cache.get('updated_at')}", "success")
+    return redirect(url_for("payroll.ai_settings_page"))
+
+
+@payroll_bp.post("/ai/settings/knowledge/review")
+@login_required
+def ai_settings_review_source():
+    source_url = (request.form.get("source_url") or "").strip()
+    decision = (request.form.get("decision") or "pending_review").strip().lower()
+    note = (request.form.get("review_note") or "").strip()
+    if not source_url:
+        flash("URL da fonte não informada para revisão.", "warning")
+        return redirect(url_for("payroll.ai_settings_page"))
+    if decision not in {"approved", "rejected", "pending_review"}:
+        flash("Decisão de revisão inválida.", "warning")
+        return redirect(url_for("payroll.ai_settings_page"))
+
+    cache = _load_ai_knowledge_cache()
+    sources = list(cache.get("sources") or [])
+    found = False
+    for src in sources:
+        if str(src.get("url") or "").strip() != source_url:
+            continue
+        if str(src.get("review_status") or "") == "blocked_domain":
+            flash("Fonte bloqueada por whitelist não pode ser aprovada até ajustar domínios permitidos.", "warning")
+            return redirect(url_for("payroll.ai_settings_page"))
+        src["review_status"] = decision
+        src["review_note"] = note
+        src["reviewed_at"] = datetime.now().isoformat()
+        src["reviewed_by"] = getattr(current_user, "email", None) or "user"
+        found = True
+        break
+
+    if not found:
+        flash("Fonte não encontrada no cache para revisão.", "warning")
+        return redirect(url_for("payroll.ai_settings_page"))
+
+    cache["sources"] = sources
+    _save_ai_knowledge_cache(cache)
+    flash("Revisão da fonte salva com sucesso.", "success")
+    return redirect(url_for("payroll.ai_settings_page"))
+
+
+def _tokenize_ptbr(text: str) -> set[str]:
+    return {tok for tok in re.findall(r"[a-zA-Zà-ÿ0-9_]{3,}", (text or "").lower())}
+
+
+def _build_ai_knowledge_context(question: str, cfg: dict[str, object]) -> dict[str, object]:
+    if not cfg.get("knowledge_enabled"):
+        return {"enabled": False, "snippets": [], "warnings": []}
+
+    cache, warnings = _refresh_ai_knowledge_cache(cfg)
+    question_tokens = _tokenize_ptbr(question)
+    ranked: list[tuple[int, dict[str, object]]] = []
+    min_score = int(cfg.get("knowledge_min_trust_score") or 70)
+    for source in list(cache.get("sources") or []):
+        if str(source.get("review_status") or "pending_review") != "approved":
+            continue
+        if int(source.get("trust_score") or 0) < min_score:
+            continue
+        content = str(source.get("content") or "")
+        if not content:
+            continue
+        content_tokens = _tokenize_ptbr(content)
+        score = len(question_tokens.intersection(content_tokens))
+        if score > 0:
+            ranked.append((score, source))
+
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    top_k = int(cfg.get("knowledge_top_k") or 3)
+    snippets = []
+    for score, source in ranked[:top_k]:
+        content = str(source.get("content") or "")
+        snippets.append(
+            {
+                "label": source.get("label"),
+                "url": source.get("url"),
+                "score": score,
+                "excerpt": content[:1000],
+            }
+        )
+
+    return {
+        "enabled": True,
+        "updated_at": cache.get("updated_at"),
+        "snippets": snippets,
+        "warnings": warnings,
+        "min_trust_score": min_score,
+        "approved_sources_total": sum(1 for s in list(cache.get("sources") or []) if str(s.get("review_status") or "") == "approved"),
+    }
+
+
+def _record_ai_usage(
+    *,
+    source: str,
+    question: str,
+    provider: str,
+    year: int,
+    month: int,
+    next_step: dict[str, object] | None,
+) -> None:
+    row = {
+        "created_at": datetime.now().isoformat(),
+        "source": source,
+        "question": question,
+        "provider": provider,
+        "year": int(year),
+        "month": int(month),
+        "next_step": (next_step or {}).get("key") if isinstance(next_step, dict) else None,
+        "user_id": getattr(current_user, "id", None),
+    }
+    try:
+        path = _ai_usage_log_file()
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        current_app.logger.warning("Falha ao registrar uso do assistente IA: %s", exc)
+
+
+def _build_ai_month_context(year: int, month: int) -> dict[str, object]:
+    run = PayrollRun.query.filter_by(year=year, month=month).first()
+    comp = date(int(year), int(month), 1)
+    _, inss_rows = _latest_inss_brackets(comp)
+    _, irrf_rows = _latest_irrf_brackets(comp)
+    irrf_cfg = _latest_irrf_config(comp)
+    closed = CompetenceClose.query.filter_by(year=year, month=month).first()
+
+    docs = {
+        "darf": GuideDocument.query.filter_by(year=year, month=month, doc_type="darf").first(),
+        "das": GuideDocument.query.filter_by(year=year, month=month, doc_type="das").first(),
+        "fgts": GuideDocument.query.filter_by(year=year, month=month, doc_type="fgts").first(),
+    }
+    company = _company_row()
+    company_readiness = _company_official_readiness(company)
+    employees_count = Employee.query.count()
+    active_employees_count = Employee.query.filter_by(active=True).count()
+    revenue_summary = _calc_revenue_month_summary(year, month)
+
+    checklist = [
+        {
+            "key": "company_profile",
+            "title": "Cadastro oficial da empresa",
+            "ok": bool(company_readiness.get("ok", False)),
+            "action_url": url_for("payroll.company_profile"),
+        },
+        {
+            "key": "employees",
+            "title": "Base de funcionários",
+            "ok": employees_count > 0 and active_employees_count > 0,
+            "action_url": url_for("payroll.employees"),
+        },
+        {
+            "key": "revenue",
+            "title": "Receitas da competência",
+            "ok": bool(revenue_summary.get("count")),
+            "action_url": url_for("payroll.revenue_home", year=year, month=month),
+        },
+        {
+            "key": "payroll",
+            "title": "Folha mensal",
+            "ok": bool(run),
+            "action_url": url_for("payroll.payroll_home", year=year, month=month),
+        },
+        {
+            "key": "taxes",
+            "title": "Tabelas INSS/IRRF",
+            "ok": bool(inss_rows) and bool(irrf_rows) and bool(irrf_cfg),
+            "action_url": url_for("payroll.tax_config"),
+        },
+        {
+            "key": "guides",
+            "title": "Guias da competência",
+            "ok": all(bool(docs.get(k)) and bool(getattr(docs.get(k), "filename", None)) for k in ("darf", "das", "fgts")),
+            "action_url": url_for("payroll.close_home", year=year, month=month),
+        },
+        {
+            "key": "close",
+            "title": "Encerramento do mês",
+            "ok": bool(closed),
+            "action_url": url_for("payroll.close_home", year=year, month=month),
+        },
+    ]
+
+    next_step = next((item for item in checklist if not item.get("ok")), None)
+    return {
+        "year": int(year),
+        "month": int(month),
+        "employees_count": int(employees_count),
+        "active_employees_count": int(active_employees_count),
+        "revenue_count": int(revenue_summary.get("count") or 0),
+        "checklist": checklist,
+        "next_step": next_step,
+    }
+
+
+def _ai_local_fallback_answer(question: str, context: dict[str, object]) -> str:
+    checklist = list(context.get("checklist") or [])
+    pending = [item for item in checklist if not item.get("ok")]
+    next_step = context.get("next_step")
+    year = int(context.get("year") or 0)
+    month = int(context.get("month") or 0)
+
+    lines = [f"Competência {month:02d}/{year}."]
+    if pending:
+        lines.append(f"Prioridade agora: {pending[0].get('title')}.")
+        lines.append(f"Ação sugerida: {pending[0].get('action_url')}.")
+        if len(pending) > 1:
+            others = ", ".join(str(item.get("title")) for item in pending[1:3])
+            lines.append(f"Depois disso, avance para: {others}.")
+    elif next_step:
+        lines.append("Você está quase finalizando. Siga o próximo passo recomendado na tela.")
+    else:
+        lines.append("Checklist principal completo. Agora valide comprovantes e mantenha a competência organizada.")
+
+    lines.append(f"Pergunta recebida: {question}")
+    lines.append("Resposta em modo local (sem API externa): foco em ordem prática e segurança contábil.")
+    return "\n".join(lines)
+
+
+def _ai_remote_assistant_answer(
+    *,
+    question: str,
+    context: dict[str, object],
+    knowledge: dict[str, object],
+    source: str,
+    cfg: dict[str, object],
+) -> tuple[str | None, str | None]:
+    if not cfg.get("enabled"):
+        return None, "Assistente IA desativado por configuração."
+    if not cfg.get("has_key"):
+        return None, "AI_API_KEY não configurada."
+
+    prompt_context = json.dumps(context, ensure_ascii=False)
+    prompt_knowledge = json.dumps(knowledge, ensure_ascii=False)
+    payload = {
+        "model": cfg.get("model"),
+        "temperature": 0.2,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "Você é um assistente operacional para rotina contábil mensal de pequena empresa. "
+                    "Responda sempre em português do Brasil, linguagem simples, passos curtos, sem juridiquês. "
+                    "Se houver pendência crítica, priorize essa ação primeiro."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Origem da pergunta: {source}.\n"
+                    f"Contexto da competência: {prompt_context}.\n"
+                    f"Base externa confiável (RAG): {prompt_knowledge}.\n"
+                    f"Pergunta do usuário: {question}\n"
+                    "Entregue: (1) prioridade agora, (2) próximos 2 passos, (3) cuidado para não errar, "
+                    "(4) referência externa útil quando houver."
+                ),
+            },
+        ],
+    }
+    headers = {
+        "Authorization": f"Bearer {cfg.get('api_key')}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        resp = requests.post(
+            str(cfg.get("api_url")),
+            headers=headers,
+            json=payload,
+            timeout=int(cfg.get("timeout_seconds") or 25),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        answer = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+        if not answer:
+            return None, "Resposta vazia do provedor de IA."
+        return answer, None
+    except Exception as exc:
+        current_app.logger.warning("Falha no assistente IA remoto: %s", exc)
+        return None, "Falha ao consultar IA externa."
+
+
+@payroll_bp.post("/ai/assistant")
+@login_required
+def ai_assistant():
+    payload = request.get_json(silent=True) or {}
+    question = str(payload.get("question") or "").strip()
+    source = str(payload.get("source") or "monthly_guide").strip() or "monthly_guide"
+
+    try:
+        year = int(payload.get("year") or datetime.now().year)
+        month = int(payload.get("month") or datetime.now().month)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Ano/mês inválidos."}), 400
+
+    if not question:
+        return jsonify({"ok": False, "error": "Digite sua pergunta para o assistente."}), 400
+    if year < 2000 or month < 1 or month > 12:
+        return jsonify({"ok": False, "error": "Competência inválida."}), 400
+
+    context = _build_ai_month_context(year=year, month=month)
+    cfg = _ai_assistant_config()
+    knowledge = _build_ai_knowledge_context(question=question, cfg=cfg)
+    remote_answer, remote_error = _ai_remote_assistant_answer(
+        question=question,
+        context=context,
+        knowledge=knowledge,
+        source=source,
+        cfg=cfg,
+    )
+
+    if remote_answer:
+        answer = remote_answer
+        provider = "remote"
+    else:
+        answer = _ai_local_fallback_answer(question=question, context=context)
+        provider = "local_fallback"
+        if remote_error:
+            answer = f"{answer}\n\nObservação técnica: {remote_error}"
+
+    _record_ai_usage(
+        source=source,
+        question=question,
+        provider=provider,
+        year=year,
+        month=month,
+        next_step=context.get("next_step") if isinstance(context.get("next_step"), dict) else None,
+    )
+
+    return jsonify(
+        {
+            "ok": True,
+            "answer": answer,
+            "provider": provider,
+            "configured": bool(cfg.get("has_key")),
+            "next_step": context.get("next_step"),
+            "knowledge_enabled": bool(knowledge.get("enabled")),
+            "knowledge_sources_used": len(list(knowledge.get("snippets") or [])),
+            "knowledge_warnings": list(knowledge.get("warnings") or []),
+        }
+    )
+
+
+@payroll_bp.post("/ai/knowledge/refresh")
+@login_required
+def ai_knowledge_refresh():
+    cfg = _ai_assistant_config()
+    if not cfg.get("knowledge_enabled"):
+        return jsonify({"ok": False, "error": "Atualização de conhecimento IA está desativada."}), 400
+
+    cache, warnings = _refresh_ai_knowledge_cache(cfg, force=True)
+    return jsonify(
+        {
+            "ok": True,
+            "updated_at": cache.get("updated_at"),
+            "sources": [
+                {"label": src.get("label"), "url": src.get("url"), "fetched_at": src.get("fetched_at")}
+                for src in list(cache.get("sources") or [])
+            ],
+            "warnings": warnings,
+        }
+    )
 
 
 def _guide_step_keys() -> set[str]:
