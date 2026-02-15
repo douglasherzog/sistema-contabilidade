@@ -603,21 +603,50 @@ def _build_ai_audit_report(cfg: dict[str, object], reviewed_sources: list[dict[s
         ordered = sorted(rows, key=lambda item: _parse_iso_dt(item.get("reviewed_at")) or datetime.min, reverse=True)
         return ordered[:limit]
 
-    risks: list[str] = []
+    risk_items: list[dict[str, object]] = []
+
+    def _add_risk(message: str, critical: bool = False) -> None:
+        risk_items.append({"message": message, "critical": critical})
+
     if not cfg.get("knowledge_enabled"):
-        risks.append("Base externa da IA está desativada; respostas não usam conteúdo confiável atualizado.")
+        _add_risk("Base externa da IA está desativada; respostas não usam conteúdo confiável atualizado.", critical=True)
     if not cfg.get("knowledge_strict_whitelist"):
-        risks.append("Whitelist estrita está desativada; domínios fora da lista podem entrar no conhecimento.")
+        _add_risk("Whitelist estrita está desativada; domínios fora da lista podem entrar no conhecimento.", critical=True)
     if not list(cfg.get("knowledge_allowed_domains") or []):
-        risks.append("Nenhum domínio permitido explicitamente configurado; revise AI_KNOWLEDGE_ALLOWED_DOMAINS.")
+        _add_risk("Nenhum domínio permitido explicitamente configurado; revise AI_KNOWLEDGE_ALLOWED_DOMAINS.")
     if pending:
-        risks.append(f"Existem {len(pending)} fonte(s) pendente(s) de revisão manual.")
+        _add_risk(f"Existem {len(pending)} fonte(s) pendente(s) de revisão manual.")
     if blocked:
-        risks.append(f"Existem {len(blocked)} fonte(s) bloqueada(s) por domínio; valide a whitelist.")
+        _add_risk(f"Existem {len(blocked)} fonte(s) bloqueada(s) por domínio; valide a whitelist.")
     if avg_score_approved is not None and avg_score_approved < int(cfg.get("knowledge_min_trust_score") or 70):
-        risks.append("Score médio das fontes aprovadas está abaixo do mínimo configurado.")
+        _add_risk("Score médio das fontes aprovadas está abaixo do mínimo configurado.", critical=True)
     if not approved:
-        risks.append("Nenhuma fonte aprovada até o momento; o RAG não terá base validada.")
+        _add_risk("Nenhuma fonte aprovada até o momento; o RAG não terá base validada.", critical=True)
+
+    risk_points = 0
+    if not cfg.get("knowledge_enabled"):
+        risk_points += 2
+    if not cfg.get("knowledge_strict_whitelist"):
+        risk_points += 2
+    if not list(cfg.get("knowledge_allowed_domains") or []):
+        risk_points += 1
+    if not approved:
+        risk_points += 2
+    if pending:
+        risk_points += 1
+    if len(pending) > 5:
+        risk_points += 1
+    if blocked:
+        risk_points += 1
+    if avg_score_approved is not None and avg_score_approved < int(cfg.get("knowledge_min_trust_score") or 70):
+        risk_points += 2
+
+    if risk_points >= 5:
+        risk_level = {"key": "high", "label": "Alto", "badge_class": "text-bg-danger"}
+    elif risk_points >= 2:
+        risk_level = {"key": "medium", "label": "Médio", "badge_class": "text-bg-warning"}
+    else:
+        risk_level = {"key": "low", "label": "Baixo", "badge_class": "text-bg-success"}
 
     return {
         "generated_at": datetime.now().isoformat(),
@@ -628,7 +657,10 @@ def _build_ai_audit_report(cfg: dict[str, object], reviewed_sources: list[dict[s
         "blocked_count": len(blocked),
         "recent_approved": _recent(approved),
         "recent_rejected": _recent(rejected),
-        "risks": risks,
+        "risks": [str(item.get("message") or "") for item in risk_items],
+        "risk_items": risk_items,
+        "critical_risks_count": sum(1 for item in risk_items if bool(item.get("critical"))),
+        "risk_level": risk_level,
     }
 
 
@@ -3097,15 +3129,38 @@ def tax_irrf_add():
 def _next_month(year: int, month: int) -> tuple[int, int]:
     if int(month) == 12:
         return int(year) + 1, 1
-    return int(year), int(month) + 1
+    return year, month + 1
+
+
+def _coerce_to_date(value: object) -> date | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value).strip())
+    except Exception:
+        pass
+    try:
+        parts = str(value).strip().split("/")
+        if len(parts) == 3:
+            dd, mm, yyyy = parts
+            return date(int(yyyy), int(mm), int(dd))
+    except Exception:
+        return None
+    return None
 
 
 def _deadline_status(today: date, due_date: date | None, paid_at: date | None) -> str:
-    if paid_at:
-        return "ok"
-    if due_date is None:
+    due = _coerce_to_date(due_date)
+    paid = _coerce_to_date(paid_at)
+    if paid:
+        return "paid"
+    if due is None:
         return "pending"
-    days_left = (due_date - today).days
+    days_left = (due - today).days
     if days_left < 0:
         return "danger"
     if days_left <= 3:
@@ -3139,8 +3194,8 @@ def _build_legal_deadlines(year: int, month: int, docs: dict[str, GuideDocument 
     out: list[dict] = []
     for item in items:
         doc = docs.get(item["key"])
-        due_date = (getattr(doc, "due_date", None) if doc else None) or default_due
-        paid_at = getattr(doc, "paid_at", None) if doc else None
+        due_date = _coerce_to_date((getattr(doc, "due_date", None) if doc else None)) or default_due
+        paid_at = _coerce_to_date(getattr(doc, "paid_at", None) if doc else None)
         status = _deadline_status(today=today, due_date=due_date, paid_at=paid_at)
 
         if paid_at:
@@ -3385,8 +3440,8 @@ def _build_obligations_agenda(year: int, month: int, docs: dict[str, GuideDocume
         ("darf", "Emitir e conferir DARF da folha"),
     ):
         doc = docs.get(key)
-        due_date = (getattr(doc, "due_date", None) if doc else None) or default_due
-        paid_at = getattr(doc, "paid_at", None) if doc else None
+        due_date = _coerce_to_date((getattr(doc, "due_date", None) if doc else None)) or default_due
+        paid_at = _coerce_to_date(getattr(doc, "paid_at", None) if doc else None)
         days_left = (due_date - today).days if due_date else None
         bucket = _agenda_bucket(days_left=days_left, paid_at=paid_at)
         action_label = "Abrir guias"
@@ -3508,8 +3563,19 @@ def _critical_close_pending_items(checklist: dict[str, dict]) -> list[dict]:
 @login_required
 def close_home():
     now = datetime.now()
-    year = int(request.args.get("year") or now.year)
-    month = int(request.args.get("month") or now.month)
+    try:
+        year = int(request.args.get("year") or now.year)
+    except (TypeError, ValueError):
+        year = now.year
+    try:
+        month = int(request.args.get("month") or now.month)
+    except (TypeError, ValueError):
+        month = now.month
+
+    if year < 2000 or month < 1 or month > 12:
+        flash("Competência inválida. Abrimos a competência atual automaticamente.", "warning")
+        year = now.year
+        month = now.month
 
     run = PayrollRun.query.filter_by(year=year, month=month).first()
     comp = date(int(year), int(month), 1)

@@ -42,7 +42,10 @@
   <div class="card-body">
     <div class="d-flex justify-content-between align-items-center mb-2">
       <h2 class="h6 mb-0">Relatório de auditoria da IA</h2>
-      <div class="small text-muted">Gerado em {{ audit_report.generated_at|fmt_dt }}</div>
+      <div class="d-flex align-items-center gap-2">
+        <span class="badge {{ audit_report.risk_level.badge_class }}">Risco geral: {{ audit_report.risk_level.label }}</span>
+        <div class="small text-muted">Gerado em {{ audit_report.generated_at|fmt_dt }}</div>
+      </div>
     </div>
 
     <div class="row g-2 mb-3">
@@ -84,17 +87,66 @@
     </div>
 
     <div class="mt-3">
-      <div class="fw-semibold mb-2">Riscos atuais</div>
-      {% if audit_report.risks %}
-        {% for risk in audit_report.risks %}
-          <div class="small text-danger mb-1">• {{ risk }}</div>
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <div class="fw-semibold mb-0">Riscos atuais</div>
+        <button class="btn btn-sm btn-outline-danger" id="toggle-critical-risks" type="button" aria-pressed="false">
+          Ver apenas riscos críticos ({{ audit_report.critical_risks_count }})
+        </button>
+      </div>
+      {% if audit_report.risk_items %}
+        <div id="risk-items-list">
+        {% for risk in audit_report.risk_items %}
+          <div class="small mb-1 risk-item {% if risk.critical %}text-danger{% else %}text-muted{% endif %}" data-critical="{{ '1' if risk.critical else '0' }}">• {{ risk.message }}</div>
         {% endfor %}
+        </div>
       {% else %}
         <div class="small text-success">Sem riscos críticos no momento.</div>
       {% endif %}
     </div>
   </div>
 </div>
+
+<script>
+  (function () {
+    var toggleBtn = document.getElementById("toggle-critical-risks");
+    var container = document.getElementById("risk-items-list");
+    if (!toggleBtn || !container) return;
+
+    var storageKey = "ai_audit_show_only_critical_risks";
+    var showingOnlyCritical = false;
+
+    try {
+      showingOnlyCritical = window.localStorage.getItem(storageKey) === "1";
+    } catch (err) {
+      showingOnlyCritical = false;
+    }
+
+    function applyFilterState() {
+      toggleBtn.setAttribute("aria-pressed", showingOnlyCritical ? "true" : "false");
+      toggleBtn.textContent = showingOnlyCritical
+        ? "Mostrar todos os riscos"
+        : "Ver apenas riscos críticos ({{ audit_report.critical_risks_count }})";
+
+      var rows = container.querySelectorAll(".risk-item");
+      rows.forEach(function (row) {
+        var isCritical = row.getAttribute("data-critical") === "1";
+        row.style.display = !showingOnlyCritical || isCritical ? "block" : "none";
+      });
+    }
+
+    applyFilterState();
+
+    toggleBtn.addEventListener("click", function () {
+      showingOnlyCritical = !showingOnlyCritical;
+      try {
+        window.localStorage.setItem(storageKey, showingOnlyCritical ? "1" : "0");
+      } catch (err) {
+        // ignore storage errors
+      }
+      applyFilterState();
+    });
+  })();
+</script>
 
 <div class="card mb-3">
   <div class="card-body">
